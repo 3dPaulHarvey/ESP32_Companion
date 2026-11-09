@@ -1,0 +1,9 @@
+/_Reference_Code/
+/recovery/
+/logs/
+/.tools/
+**/__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example

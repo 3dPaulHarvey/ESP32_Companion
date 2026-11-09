@@ -1,0 +1,6 @@
+* text=auto
+*.bin -text
+*.ogg -text
+*.png -text
+*.jpg -text
+*.ttf -text
