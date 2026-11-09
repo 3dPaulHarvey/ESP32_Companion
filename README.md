@@ -4,6 +4,8 @@ Step 1 establishes a recoverable build of the supplied TechTalkies Xiaozhi firmw
 
 **First smoke test passed on 2026-11-09:** source built and flashed successfully; serial startup, eyes, startup sound, and English wake response verified. Original flash and both build variants are saved locally for recovery.
 
+**Local diagnostic mode is available:** independent face/tone/microphone-level tests and repeated English wake acknowledgment, with Wi-Fi off at boot. [Diagnostic commands and test procedure](docs/DIAGNOSTICS.md).
+
 - Working ESP-IDF project: `Source/xiaozhi-esp32-2.2.2/`.
 - Supplied reference: `_Reference_Code/` (untouched and excluded from Git).
 - Toolchain: installed **ESP-IDF v5.5.2**, matching this source's minimum requirement.
@@ -21,6 +23,8 @@ Open `ESP32_Companion.code-workspace` in VS Code. Select the **Firmware** folder
 ```
 
 Build/flash/monitor tasks are also available through **Terminal > Run Task**. Read the recovery procedure before the first flash.
+
+To build or flash local diagnostics, add `-Profile diagnostics` to the wrapper command. The default profile remains `baseline`.
 
 Cloudflare and Gemini work is deferred until the hardware baseline passes. The baseline retains the original network, activation, and protocol behavior.
 

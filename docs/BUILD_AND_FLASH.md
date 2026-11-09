@@ -2,6 +2,8 @@
 
 Use the development unit on **COM26**. Leave the original working robot separate.
 
+For cloud-independent subsystem checks, use the separate [local diagnostics profile](DIAGNOSTICS.md). It is currently the test firmware on COM26; normal baseline commands below restore the original application behavior with English wake.
+
 ## Pinned setup
 
 - ESP-IDF **v5.5.2**, clean installed Git tag at `C:\esp\v5.5.2\esp-idf`.

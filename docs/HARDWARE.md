@@ -8,6 +8,7 @@ Last updated: 2026-11-09. Development device: **COM26**.
 - Detected flash: **8 MB**, manufacturer `c8`, device `4017`, quad, 3.3 V.
 - Chip identification reports embedded **8 MB AP_3v3 PSRAM**. Baseline boot successfully initialized it at 80 MHz and added all 8 MB to the allocator; a separate stress test has not been run.
 - The compiled baseline boots on COM26, initializes OLED/LVGL and simplex I2S, connects to Wi-Fi, and reaches idle. After switching to bundled `wn9_hiesp`, serial confirms that model and the running AFE task. The user confirms working eyes, startup sound, and an English wake response. The wiring below remains source evidence, not a pin-by-pin electrical verification.
+- Local diagnostic firmware now loads the model without cloud startup. User and serial evidence confirm repeated wake/cue/re-arm with Wi-Fi off, face-state cycling, and generated speaker tones. Microphone statistics respond to sound; close/loud input clips and input headroom still needs calibration before voice streaming. Saved-credential Wi-Fi connection and device-side reconnect passed; AP power-off/on was skipped by the user.
 
 ## Wiring to preserve
 
@@ -97,12 +98,15 @@ Record evidence and firmware/build identity in [`TEST_LOG.md`](TEST_LOG.md). Unc
 - [x] Boot log shows PSRAM initialized and reports free internal heap/PSRAM.
 - [x] User confirms eyes and audible startup cue work.
 - [x] User confirms wake response to “Hi, E-S-P”; microphone path works for recognition.
-- [ ] OLED initializes at 0x3C; idle face and blink are visible; listening/speaking expressions work.
-- [ ] Microphone 16 kHz PCM peak/RMS responds to silence, voice and gentle taps; clipping remains controlled.
-- [ ] Low-volume local speaker tone/sample is audible without obvious distortion.
-- [ ] Wi-Fi connects, reports an IP address and recovers after access point interruption.
+- [x] OLED initializes at 0x3C; user confirms idle/listening/speaking expressions work.
+- [x] Microphone 16 kHz PCM sample count/RMS/peak/clipping measured during quiet, voice and tap test; wake works from 1–2 feet.
+- [ ] Calibrate microphone input headroom before streaming; higher-level input can clip with the original conversion.
+- [x] User confirms low-volume generated tones and local acknowledgment sample work.
+- [x] Wi-Fi connects, obtains IP and recovers after a device-side disconnect.
+- [ ] Physical access-point disable/re-enable test (skipped by user).
 - [x] Local model `wn9_hiesp` logged and supported English phrase tested; original Chinese baseline preserved.
-- [ ] Repeated wake events appear in serial with Wi-Fi unavailable and no cloud connection.
-- [ ] No watchdog reset or persistent memory decline during the smoke test.
+- [x] Three wake events/cues/re-arms recorded with Wi-Fi off and cloud startup disabled.
+- [x] No panic/watchdog in bounded captures; internal minimum heap stabilized at 83,519 bytes during Wi-Fi tests.
+- [ ] Extended memory/uptime soak (not part of the short diagnostic run).
 
 Use aggregate microphone levels, not continuous raw audio dumps. Keep one owner of microphone reads: direct codec diagnostics must not race the audio service input task. Physical display/speaker observations require the person at the device; serial initialization alone does not prove those peripherals work.
