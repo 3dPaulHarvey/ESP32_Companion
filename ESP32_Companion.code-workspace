@@ -1,0 +1,16 @@
+{
+    "folders": [
+        { "name": "Companion", "path": "." },
+        { "name": "Firmware", "path": "Source/xiaozhi-esp32-2.2.2" }
+    ],
+    "settings": {
+        "idf.currentSetup": "C:\\esp\\v5.5.2\\esp-idf",
+        "idf.port": "COM26",
+        "idf.monitorPort": "COM26",
+        "idf.sdkconfigDefaults": [
+            "sdkconfig.defaults",
+            "sdkconfig.defaults.esp32s3",
+            "sdkconfig.baseline"
+        ]
+    }
+}

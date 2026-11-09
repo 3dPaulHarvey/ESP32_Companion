@@ -7,7 +7,7 @@ dist/
 .devcontainer/
 sdkconfig.old
 sdkconfig
-dependencies.lock
+# Retain resolved component versions for this hardware baseline.
 .env
 releases/
 main/assets/lang_config.h
