@@ -96,3 +96,34 @@ Corrected USB build Wi-Fi captures maintained at least 83,519 bytes of internal 
 Scope reached: independent hardware diagnostic mode, local model loading/repeated wake, display/tone/PCM statistics, Wi-Fi connection and device-side recovery. Remaining observations: physical AP outage (user skipped), extended soak, and microphone headroom calibration. Cloudflare/Gemini and production companion state-machine integration remain later phases.
 
 Final state: COM26 is left in the local diagnostic profile, awake-ready/idle with Wi-Fi off. Final capture: `logs/diagnostics-final-reboot-summary.log`; runtime ELF prefix `4ba178bcf`, app v2.2.2 / IDF v5.5.2. No panic/assert/watchdog observed. Serial capture has closed. Restore normal cloud-backed baseline with the command in `DIAGNOSTICS.md` when desired.
+
+## 2026-11-09 — Phase 2a: explicit local states
+
+Following the user's request to verify small steps, this increment adds the explicit `IDLE -> WAKE_DETECTED -> LISTENING -> SPEAKING -> IDLE` controller to the existing cloud-disabled profile. It is a **timed UI/cue rehearsal**, with `capture=disabled`; the 400 ms LISTENING state does not yet capture a PCM segment. Bounded capture remains the next implementation task.
+
+The controller owns only state/deadlines/counters. The diagnostic main task owns eye changes, cue playback and wake re-arming. Busy wakes and `d`/`t` overrides are rejected. Serial (`n`) triggers and genuine voice wakes have separate counters/source labels.
+
+| Check | Result |
+|---|---|
+| Target identity | COM26 initially absent; user reconnected it; USB identity and esptool MAC match the original development device. COM24 was a different device and was not flashed |
+| Host controller tests | PASS with C++17 and `-Wall -Wextra -Werror -pedantic`: boundaries, busy duplicates, delayed ticks, ten cycles, reset and state names |
+| Cross-compiler invariants | PASS: constexpr `static_assert` timing / repeated-cycle checks compiled by ESP32 toolchain |
+| Build | PASS: app 2,537,536 bytes, 18% app-partition headroom; partition table unchanged |
+| Flash | PASS: normal diagnostics-profile flash; all image hash checks passed |
+| Boot | PASS: ELF prefix `2570c1b20`, explicit IDLE / timed-ui-rehearsal / capture-disabled banner, zero counters, English model ready, Wi-Fi off |
+| Automated serial cycles | PASS: ten complete synthetic cycles, ordered states and dwell times, busy duplicate wake and `d`/`t` rejection; final IDLE, started=completed=10, voice=0, serial=10 |
+| First physical voice run | User reported misses/sticking in background noise. Trace recorded ten accepted voice cycles, all four transitions and ten completions, no rejected voice event or panic; it does not establish how many spoken attempts were missed |
+| Quieter physical retry | PASS: user confirms all ten attempts worked at 1–2 feet with background audio paused; trace contains 11 complete voice-triggered cycles (IDs 21–31), each with all four transitions and re-arm |
+| Network interruption | PASS: one synthetic cycle completed while the station was intentionally disconnected, then Wi-Fi reconnected/obtained IP; ordered recovery and final connected status verified |
+| Wi-Fi shutdown | PASS: `o` completed shutdown and local microphone sampling continued |
+| Reboot | PASS: local IDLE, started/completed/voice/serial counters all zero, English wake model ready, Wi-Fi off and cloud disabled |
+
+Build/flash logs: `logs/phase2a-build.log`, `logs/phase2a-flash.log`. New images/config/flash map archived separately at `recovery/2026-11-09-COM26/phase-2a-local-states/`; app SHA256 `3bbb1b5143b61aa506487b90f003699c2019dce57f66f4e2d3059eed3121598b`. Previous Phase 1 image and original full-flash recovery remain saved. See [LOCAL_STATES.md](LOCAL_STATES.md) for the verification procedure.
+
+Implementation checkpoint: `84c658c`. Serial verification logs are under `logs/phase2a-serial-cycles-private.log`, `phase2a-real-wakes-summary.log`, `phase2a-real-wakes-quiet-summary.log`, and `phase2a-network-cycle-private.log`. Synthetic and real-wake counts are not interchangeable: the verification observed 10 synthetic cycles initially, 10 accepted voice cycles in the first run, 11 voice cycles in the quieter retry, and one additional synthetic network-interruption cycle.
+
+The first noisy trial remains recorded as a user-reported failure; ten accepted detections completing normally do not prove every spoken attempt was recognized or every cue was heard. The quiet retry supplied a physical pass. Background-noise robustness and microphone headroom calibration remain open. No microphone segment is recorded by the LISTENING state in this increment; it remains a timed UI rehearsal before bounded PCM capture is added.
+
+Before the final reboot, status confirmed `IDLE started=32 completed=32 voice_started=21 serial_started=11`. All captured cycles completed, and no panic/assert/watchdog appeared. Lowest reported internal heap across these captures was 71,055 bytes during the Wi-Fi test; this is a bounded functional check, not a long soak. Final capture `logs/phase2a-final-reboot-summary.log` confirms the device is left idle on COM26 with Wi-Fi off and serial capture closed. Existing local editor settings were preserved outside the implementation commits.
+
+**Phase 2a state/UI checkpoint verified.** Phase 2 remains incomplete until bounded PCM capture (and its level/headroom checks) is implemented and verified. Original baseline and prior diagnostic recovery images remain available.
