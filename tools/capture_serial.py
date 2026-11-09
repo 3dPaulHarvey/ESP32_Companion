@@ -51,7 +51,8 @@ def main():
     safe_markers = (
         "esp_psram:", "esp_image:", "app_init:", "spi_flash:",
         "SeeedStudioS3WifiBoard:", "OledDisplay:", "NoAudioCodec:",
-        "AudioCodec:", "AfeWakeWord:", "State:", "free heap", "SystemInfo: free sram:",
+        "AudioCodec:", "AfeWakeWord:", "Wake word detected:", "State:",
+        "free heap", "SystemInfo: free sram:",
         "Guru Meditation", "Backtrace:", "assert failed:",
     )
     blocked = ("password", "token", "authorization", "secret", "ssid", "transcript")

@@ -2,10 +2,13 @@
 
 Step 1 establishes a recoverable build of the supplied TechTalkies Xiaozhi firmware on the development XIAO ESP32-S3 at **COM26**.
 
+**First smoke test passed on 2026-11-09:** source built and flashed successfully; serial startup, eyes, startup sound, and English wake response verified. Original flash and both build variants are saved locally for recovery.
+
 - Working ESP-IDF project: `Source/xiaozhi-esp32-2.2.2/`.
 - Supplied reference: `_Reference_Code/` (untouched and excluded from Git).
 - Toolchain: installed **ESP-IDF v5.5.2**, matching this source's minimum requirement.
 - Hardware: probed **8 MB flash / 8 MB embedded PSRAM**, SSD1306 128x64 profile.
+- Development wake phrase: **“Hi, ESP”** (say “Hi, E-S-P”). The first Chinese-model build is preserved at tag `step-1-baseline-flashed`.
 - [Build, flash and recovery](docs/BUILD_AND_FLASH.md)
 - [Hardware and wiring](docs/HARDWARE.md)
 - [Observed test results](docs/TEST_LOG.md)

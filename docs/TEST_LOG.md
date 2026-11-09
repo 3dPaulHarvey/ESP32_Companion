@@ -37,3 +37,23 @@ Local tooling checks passed: PowerShell syntax, Python byte compilation, workspa
 User observations: eyes and startup sound work. Chinese wake attempt is inconclusive because the user does not speak Chinese. Check the bundled English wake model next, preserving this initial build first.
 
 Pending first hardware milestone: reliable wake recognition. Microphone RMS/peak/clipping, speaker tone, face-state cycling, Wi-Fi reconnect, and repeatable network-independent wake diagnostics remain Phase 1 work. The original activation and protocol behavior is preserved; this baseline is not the cloud-independent companion yet.
+
+## 2026-11-09 — English wake follow-up
+
+The user cannot reliably test the original Chinese phrase. Selected the existing ESP-SR `wn9_hiesp` model for **“Hi, ESP”**, disabling `wn9_nihaoxiaozhi_tts` in the persistent profile and current generated config. No application or GPIO changes. Initial flashed baseline is preserved at commit `d4c7d63`, tag `step-1-baseline-flashed`, and in the recovery archive.
+
+| Check | Observed result |
+|---|---|
+| Model selection | PASS: assets parser selects exactly `wn9_hiesp`; Chinese model disabled |
+| Build | PASS: app 2,614,000 bytes, 15% app partition free; assets 624,471 bytes |
+| Flash | PASS: all images/assets written to COM26 and hashes verified |
+| Runtime identity | PASS: app 2.2.2, IDF v5.5.2, ELF SHA prefix `6c5a6adc2`; no OTA replacement observed |
+| Runtime model | PASS: `AfeWakeWord: Model 0: wn9_hiesp`; AFE feed/fetch 512; returned to idle |
+| Physical wake test | PASS: user confirms “It wakes or responds” when testing “Hi, E-S-P” |
+| Microphone path | PASS for wake recognition; aggregate level/clipping diagnostics remain untested |
+| Display / speaker | User previously confirmed eyes and startup cue work |
+| Independent/offline diagnostics | Not run; baseline retains original network/cloud behavior |
+
+English build artifacts and resolved config are archived separately in `recovery/2026-11-09-COM26/english-wake/`. App SHA256: `645cb17fe386c7b8fd3d7a020a688ee8e8e4d834824c530e4628ef715bf342fe`. Logs: `logs/english-wake-build.log`, `logs/english-wake-flash.log`, `logs/english-wake-boot-summary.log`, and bounded wake-test capture. Full serial output stays Git-ignored.
+
+**First hardware smoke-test milestone passed:** local source build, safe flash/recovery, serial boot, working eyes/startup sound, and a usable English wake phrase. Stop here for review before adding the network-independent diagnostic mode. Phase 1's mic statistics, local tone/face cycling, offline repeatability, and Wi-Fi outage recovery are still open.

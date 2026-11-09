@@ -7,7 +7,7 @@ Last updated: 2026-11-09. Development device: **COM26**.
 - ESP32-S3 revision 0.2; 40 MHz crystal; USB Serial/JTAG connection.
 - Detected flash: **8 MB**, manufacturer `c8`, device `4017`, quad, 3.3 V.
 - Chip identification reports embedded **8 MB AP_3v3 PSRAM**. Baseline boot successfully initialized it at 80 MHz and added all 8 MB to the allocator; a separate stress test has not been run.
-- The compiled baseline boots on COM26, initializes OLED/LVGL and simplex I2S, connects to Wi-Fi, reaches idle, and starts the AFE task with `wn9_nihaoxiaozhi_tts`. The user confirms working eyes and audible startup sound. Microphone response and phrase detection still need verification. The wiring below remains source evidence, not a pin-by-pin electrical verification.
+- The compiled baseline boots on COM26, initializes OLED/LVGL and simplex I2S, connects to Wi-Fi, and reaches idle. After switching to bundled `wn9_hiesp`, serial confirms that model and the running AFE task. The user confirms working eyes, startup sound, and an English wake response. The wiring below remains source evidence, not a pin-by-pin electrical verification.
 
 ## Wiring to preserve
 
@@ -59,7 +59,7 @@ Source inconsistencies found during inspection:
 
 The existing OLED face updates every 60 ms. `SetFaceState(FaceState::Idle/Listening/Speaking)` selects the expression; `SetEmotion()` is a no-op in this fork. Use the existing face implementation in diagnostics.
 
-S3 defaults select `CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=y`, suggesting the phrase **“Ni hao Xiao Zhi”**. This remains a build default until the flashed asset model and a detected event confirm it. Runtime wake detection is selected from the models loaded from the **assets partition**, not solely from a Kconfig option. Missing or unflashed assets can leave wake detection unavailable.
+The first baseline boot loaded `wn9_nihaoxiaozhi_tts` from the generic S3 defaults. The user does not speak Chinese, so its phrase test was inconclusive. The development profile now disables that model and selects bundled English **“Hi, ESP”** (`CONFIG_SR_WN_WN9_HIESP=y`), spoken “Hi, E-S-P.” Runtime wake detection is selected from models loaded from the **assets partition**, not solely from a Kconfig option. Missing or unflashed assets can leave wake detection unavailable; confirm the new model name in serial before testing it.
 
 Relevant source paths, relative to the firmware root:
 
@@ -96,11 +96,12 @@ Record evidence and firmware/build identity in [`TEST_LOG.md`](TEST_LOG.md). Unc
 - [x] Successful build/flash with correct board, flash, partition and display settings.
 - [x] Boot log shows PSRAM initialized and reports free internal heap/PSRAM.
 - [x] User confirms eyes and audible startup cue work.
+- [x] User confirms wake response to “Hi, E-S-P”; microphone path works for recognition.
 - [ ] OLED initializes at 0x3C; idle face and blink are visible; listening/speaking expressions work.
 - [ ] Microphone 16 kHz PCM peak/RMS responds to silence, voice and gentle taps; clipping remains controlled.
 - [ ] Low-volume local speaker tone/sample is audible without obvious distortion.
 - [ ] Wi-Fi connects, reports an IP address and recovers after access point interruption.
-- [x] Local asset model name logged; Chinese wake attempt inconclusive for non-Chinese speaker.
+- [x] Local model `wn9_hiesp` logged and supported English phrase tested; original Chinese baseline preserved.
 - [ ] Repeated wake events appear in serial with Wi-Fi unavailable and no cloud connection.
 - [ ] No watchdog reset or persistent memory decline during the smoke test.
 

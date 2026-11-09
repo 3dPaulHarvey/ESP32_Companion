@@ -13,6 +13,10 @@ Use the development unit on **COM26**. Leave the original working robot separate
 
 The board README's IDF 5.4.1 instructions are stale for this archive: `main/idf_component.yml` requires `>=5.5.2`. Its board `config.json` also has invalid board/flash symbols. Use the explicit `sdkconfig.baseline` profile rather than that release recipe.
 
+The current development profile selects bundled English **“Hi, ESP”** (`CONFIG_SR_WN_WN9_HIESP=y`) and disables the generic Chinese wake model. Say “Hi, E-S-P” with the three letters spoken separately. This is an existing ESP-SR model, documented in [Espressif's English example](https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/getting_started/readme.html). The original successful Chinese-model build is tagged `step-1-baseline-flashed` and archived in `recovery/.../built-baseline/`.
+
+To apply this change to an already-generated Chinese `sdkconfig`, use `idf.py menuconfig` and select the Hi,ESP WakeNet9 model while deselecting `wn9_nihaoxiaozhi_tts`. Default files seed fresh configurations; they do not override existing selections. A normal build/flash must include regenerated assets. Verify boot logs show `AfeWakeWord: Model 0: wn9_hiesp`.
+
 ## Exact commands
 
 From the repository root, PowerShell:
@@ -81,6 +85,8 @@ This resets the device and prints selected hardware/state lines. Full output sta
 - [ ] Mic responds to voice (requires diagnostic measurement or proven conversation).
 - [ ] Wi-Fi connects/provisions; no credential values are copied into committed logs.
 - [ ] Actual loaded wake phrase is identified and repeatable.
+
+In the unchanged production application, `Wake word detected: ...` is logged only after opening the cloud audio channel succeeds. A local recognition can first appear as `idle -> connecting`, even if the service then fails. Use that state transition as local detection evidence; absent speech alone does not prove a microphone failure.
 
 Record measured results in `TEST_LOG.md`; source inspection alone does not pass these checks. Network-independent diagnostics belong to the next small implementation after this baseline is reviewable.
 
