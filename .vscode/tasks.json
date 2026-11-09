@@ -2,6 +2,20 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "Companion: build local diagnostics",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/tools/idf.ps1", "-Action", "build", "-Profile", "diagnostics"],
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Companion: flash local diagnostics COM26",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/tools/idf.ps1", "-Action", "flash", "-Profile", "diagnostics", "-Port", "COM26"],
+            "problemMatcher": ["$gcc"]
+        },
+        {
             "label": "Companion: build baseline",
             "type": "process",
             "command": "powershell.exe",

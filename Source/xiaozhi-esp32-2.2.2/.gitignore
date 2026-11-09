@@ -2,6 +2,8 @@ tmp/
 components/
 managed_components/
 build/
+build-*/
+sdkconfig.*.generated*
 dist/
 .vscode/
 .devcontainer/

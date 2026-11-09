@@ -40,6 +40,10 @@ set(SOURCES "audio/audio_codec.cc"
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "protocols")
 
+if(CONFIG_COMPANION_HARDWARE_DIAGNOSTICS)
+    list(APPEND SOURCES "hardware_diagnostics.cc")
+endif()
+
 # Add board common files
 list(APPEND SOURCES
     "boards/common/board.cc"

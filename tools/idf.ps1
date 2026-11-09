@@ -1,7 +1,9 @@
 param(
     [ValidateSet('build', 'flash', 'monitor', 'reconfigure', 'merge-bin')]
     [string]$Action = 'build',
-    [string]$Port = 'COM26'
+    [string]$Port = 'COM26',
+    [ValidateSet('baseline', 'diagnostics')]
+    [string]$Profile = 'baseline'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,6 +17,11 @@ if (-not (Test-Path -LiteralPath $activation)) {
 Push-Location $firmwareRoot
 try {
     $idfArguments = @('-DIDF_TARGET=esp32s3', '-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.baseline')
+    if ($Profile -eq 'diagnostics') {
+        $idfArguments = @('-B', 'build-diagnostics', '-DIDF_TARGET=esp32s3',
+            '-DSDKCONFIG=sdkconfig.diagnostics.generated',
+            '-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.baseline;config/diagnostics.defaults')
+    }
     if ($Action -in @('flash', 'monitor')) {
         $idfArguments += @('-p', $Port)
     }

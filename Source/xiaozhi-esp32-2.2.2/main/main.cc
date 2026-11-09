@@ -9,6 +9,9 @@
 
 #include "application.h"
 #include "system_info.h"
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+#include "hardware_diagnostics.h"
+#endif
 
 #define TAG "main"
 
@@ -23,8 +26,12 @@ extern "C" void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+    RunHardwareDiagnostics();
+#else
     // Initialize and run the application
     auto& app = Application::GetInstance();
     app.Initialize();
     app.Run();  // This function runs the main event loop and never returns
+#endif
 }

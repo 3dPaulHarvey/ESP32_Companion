@@ -2,6 +2,11 @@
 #include <esp_log.h>
 #include <cstring>
 
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+#include <cmath>
+#include <cstdint>
+#endif
+
 #define RATE_CVT_CFG(_src_rate, _dest_rate, _channel)        \
     (esp_ae_rate_cvt_cfg_t)                                  \
     {                                                        \
@@ -228,6 +233,50 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
 }
 
 void AudioService::AudioInputTask() {
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+    int64_t level_window_start_us = 0;
+    uint64_t level_square_sum = 0;
+    uint32_t level_samples = 0;
+    uint32_t level_clipped = 0;
+    int32_t level_peak = 0;
+    const size_t level_channel_stride = codec_->input_channels() > 0 ? codec_->input_channels() : 1;
+    auto report_mic_levels = [&](const std::vector<int16_t>& data) {
+        if (data.empty()) {
+            return;
+        }
+        const int64_t now_us = esp_timer_get_time();
+        if (level_window_start_us == 0) {
+            level_window_start_us = now_us;
+        }
+        // Measure the first microphone channel, skipping any interleaved reference.
+        for (size_t i = 0; i < data.size(); i += level_channel_stride) {
+            const int32_t sample = data[i];
+            const int32_t magnitude = sample < 0 ? -sample : sample;
+            level_square_sum += static_cast<uint64_t>(magnitude) * magnitude;
+            ++level_samples;
+            if (magnitude > level_peak) {
+                level_peak = magnitude;
+            }
+            // The existing codec clips negative overflow to -32767.
+            if (magnitude >= 32767) {
+                ++level_clipped;
+            }
+        }
+        if (now_us - level_window_start_us >= 1000000) {
+            const uint32_t rms = static_cast<uint32_t>(
+                std::sqrt(static_cast<double>(level_square_sum) / level_samples));
+            ESP_LOGI("MicDiagnostics", "Mic level: samples=%lu rms=%lu peak=%ld clipped=%lu",
+                static_cast<unsigned long>(level_samples), static_cast<unsigned long>(rms),
+                static_cast<long>(level_peak), static_cast<unsigned long>(level_clipped));
+            level_window_start_us = 0;
+            level_square_sum = 0;
+            level_samples = 0;
+            level_clipped = 0;
+            level_peak = 0;
+        }
+    };
+#endif
+
     while (true) {
         EventBits_t bits = xEventGroupWaitBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
             AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING,
@@ -271,6 +320,9 @@ void AudioService::AudioInputTask() {
             int samples = wake_word_->GetFeedSize();
             if (samples > 0) {
                 if (ReadAudioData(data, 16000, samples)) {
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+                    report_mic_levels(data);
+#endif
                     wake_word_->Feed(data);
                     continue;
                 }

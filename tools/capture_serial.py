@@ -17,9 +17,13 @@ def main():
     parser.add_argument("--seconds", type=int, default=30, choices=range(1, 61), metavar="1..60")
     parser.add_argument("--reset", action="store_true", help="Reset device before capture")
     parser.add_argument("--name", default="boot", help="Log basename under logs/")
+    parser.add_argument("--send", choices=list("hdtwors"), help="Send one diagnostic menu command")
+    parser.add_argument("--send-after", type=float, default=0.5, help="Seconds before sending the command")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_-]+", args.name):
         parser.error("--name must contain only letters, digits, underscores or hyphens")
+    if args.send and not 0 <= args.send_after < args.seconds:
+        parser.error("--send-after must be within the capture duration")
 
     output = Path(__file__).resolve().parent.parent / "logs"
     output.mkdir(exist_ok=True)
@@ -40,8 +44,15 @@ def main():
             time.sleep(0.2)
             connection.rts = False
             connection.dtr = connection.dtr
-        deadline = time.monotonic() + args.seconds
+        started = time.monotonic()
+        deadline = started + args.seconds
+        sent = False
         while time.monotonic() < deadline:
+            if args.send and not sent and time.monotonic() >= started + args.send_after:
+                connection.write(args.send.encode("ascii"))
+                connection.flush()
+                sent = True
+                print(f"Sent diagnostic command: {args.send}", flush=True)
             chunks.append(connection.read(connection.in_waiting or 1))
     finally:
         connection.close()
@@ -53,6 +64,7 @@ def main():
         "SeeedStudioS3WifiBoard:", "OledDisplay:", "NoAudioCodec:",
         "AudioCodec:", "AfeWakeWord:", "Wake word detected:", "State:",
         "free heap", "SystemInfo: free sram:",
+        "HardwareDiagnostics:", "MicDiagnostics:",
         "Guru Meditation", "Backtrace:", "assert failed:",
     )
     blocked = ("password", "token", "authorization", "secret", "ssid", "transcript")
