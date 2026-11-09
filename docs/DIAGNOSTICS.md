@@ -53,12 +53,15 @@ Commands are single lowercase characters; Enter is optional.
 | Key | Action |
 |---|---|
 | `h` | Print menu |
+| `n` | Run a labelled synthetic local state cycle (no voice recognition implied) |
 | `d` | Repeat idle/listening/speaking/idle display cycle |
 | `t` | Play the existing local popup sample through the audio playback pipeline |
 | `s` | Report wake count, Wi-Fi status and memory |
 | `w` | Start the existing Wi-Fi manager with saved credentials; print IP/RSSI upon connection |
 | `o` | Stop Wi-Fi station/radio; local wake remains available |
 | `r` | Disconnect a connected station and let the existing manager reconnect automatically |
+
+The wake/cue sequence now uses the [explicit local controller](LOCAL_STATES.md). Its LISTENING/SPEAKING states currently rehearse UI timing; bounded microphone-segment capture comes next. Face/cue test commands are ignored during an active cycle.
 
 The Wi-Fi test uses the existing `WifiManager` directly, avoiding the production board's provisioning timeout and application/cloud callbacks. It starts no configuration hotspot and does not change saved credentials. A missing access point is retried with bounded scan backoff. The `r` command tests device-side reconnection; physically disabling/re-enabling the access point is a separate observation.
 

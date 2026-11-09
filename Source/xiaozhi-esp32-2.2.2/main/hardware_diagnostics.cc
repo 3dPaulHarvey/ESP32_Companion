@@ -6,6 +6,7 @@
 #include "audio_codec.h"
 #include "board.h"
 #include "display.h"
+#include "local_companion_cycle.h"
 
 #include <atomic>
 #include <cmath>
@@ -79,7 +80,7 @@ void SetFace(Display& display, FaceState face, const char* label) {
 }
 
 void PrintHelp() {
-    ESP_LOGI(kTag, "COMMANDS h=help d=face-cycle t=local-cue w=WiFi-start o=WiFi-off r=disconnect/retry s=status");
+    ESP_LOGI(kTag, "COMMANDS h=help n=synthetic-cycle d=face-cycle t=local-cue w=WiFi-start o=WiFi-off r=disconnect/retry s=status");
 }
 
 const char* WifiEventName(WifiEvent event) {
@@ -158,11 +159,54 @@ const char* WifiEventName(WifiEvent event) {
     std::atomic<bool> wifi_stop_complete{false};
     esp_event_handler_instance_t stop_handler = nullptr;
     uint32_t handled_wakes = 0;
-    int wake_phase = 0;
+    LocalCompanionCycle cycle;
+    uint32_t voice_cycles = 0;
+    uint32_t serial_cycles = 0;
+    const char* cycle_source = "none";
     int face_step = 0;
     int64_t face_deadline = 0;
-    int64_t wake_deadline = 0;
     int64_t memory_deadline = esp_timer_get_time() + 10000000;
+    ESP_LOGI("LocalCompanion", "STATE IDLE mode=timed-ui-rehearsal capture=disabled cloud=disabled");
+
+    auto on_transition = [&](LocalCompanionState previous) {
+        ESP_LOGI("LocalCompanion", "STATE %s -> %s cycle=%lu source=%s",
+            LocalCompanionCycle::StateName(previous), LocalCompanionCycle::StateName(cycle.state()),
+            static_cast<unsigned long>(cycle.started()), cycle_source);
+        switch (cycle.state()) {
+            case LocalCompanionState::WakeDetected:
+                audio.EnableWakeWordDetection(false);
+                face_step = 0;
+                SetFace(display, FaceState::Listening, "wake-detected");
+                break;
+            case LocalCompanionState::Listening:
+                SetFace(display, FaceState::Listening, "listening/timed-ui-test");
+                break;
+            case LocalCompanionState::Speaking:
+                SetFace(display, FaceState::Speaking, "speaking/local-cue");
+                audio.PlaySound(Lang::Sounds::OGG_POPUP);
+                break;
+            case LocalCompanionState::Idle:
+                SetFace(display, FaceState::Idle, "idle/blink");
+                audio.EnableWakeWordDetection(true);
+                ESP_LOGI("LocalCompanion", "CYCLE_COMPLETE cycle=%lu completed=%lu source=%s voice_started=%lu serial_started=%lu",
+                    static_cast<unsigned long>(cycle.started()), static_cast<unsigned long>(cycle.completed()),
+                    cycle_source, static_cast<unsigned long>(voice_cycles), static_cast<unsigned long>(serial_cycles));
+                ESP_LOGI(kTag, "WAKE_READY count=%lu WiFi=%s cloud=disabled",
+                    static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off");
+                break;
+        }
+    };
+    auto begin_cycle = [&](int64_t now, const char* source) {
+        const auto previous = cycle.state();
+        if (!cycle.BeginWake(now)) {
+            ESP_LOGI("LocalCompanion", "WAKE_IGNORED source=%s state=%s", source,
+                LocalCompanionCycle::StateName(cycle.state()));
+            return;
+        }
+        cycle_source = source;
+        if (source[0] == 'v') { ++voice_cycles; } else { ++serial_cycles; }
+        on_transition(previous);
+    };
 
     while (true) {
         const int64_t now = esp_timer_get_time();
@@ -174,27 +218,15 @@ const char* WifiEventName(WifiEvent event) {
         const uint32_t observed_wakes = wake_count.load(std::memory_order_relaxed);
         if (observed_wakes != handled_wakes) {
             handled_wakes = observed_wakes;
-            audio.EnableWakeWordDetection(false);
-            face_step = 0;
             ESP_LOGI(kTag, "WAKE_DETECTED count=%lu WiFi=%s cloud=disabled",
                 static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off");
-            SetFace(display, FaceState::Listening, "listening/local-wake");
-            wake_phase = 1;
-            wake_deadline = now + 400000;
+            begin_cycle(now, "voice");
         }
-        if (wake_phase == 1 && now >= wake_deadline) {
-            SetFace(display, FaceState::Speaking, "speaking/local-cue");
-            audio.PlaySound(Lang::Sounds::OGG_POPUP);
-            wake_phase = 2;
-            wake_deadline = now + 800000;
-        } else if (wake_phase == 2 && now >= wake_deadline) {
-            SetFace(display, FaceState::Idle, "idle/blink");
-            audio.EnableWakeWordDetection(true);
-            wake_phase = 0;
-            ESP_LOGI(kTag, "WAKE_READY count=%lu WiFi=%s cloud=disabled",
-                static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off");
+        const auto previous = cycle.state();
+        if (cycle.Tick(now)) {
+            on_transition(previous);
         }
-        if (face_step != 0 && now >= face_deadline && wake_phase == 0) {
+        if (face_step != 0 && now >= face_deadline && cycle.state() == LocalCompanionState::Idle) {
             if (face_step == 1) { SetFace(display, FaceState::Listening, "listening/test"); }
             if (face_step == 2) { SetFace(display, FaceState::Speaking, "speaking/test"); }
             if (face_step == 3) { SetFace(display, FaceState::Idle, "idle/blink"); }
@@ -206,19 +238,32 @@ const char* WifiEventName(WifiEvent event) {
         if (read(STDIN_FILENO, &command, 1) == 1) {
             switch (command) {
                 case 'h': PrintHelp(); break;
+                case 'n': begin_cycle(now, "serial"); break;
                 case 's':
                     PrintMemory();
                     ESP_LOGI(kTag, "STATUS wakes=%lu WiFi=%s connected=%d cloud=disabled",
                         static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off", wifi.IsConnected());
+                    ESP_LOGI("LocalCompanion", "STATUS state=%s started=%lu completed=%lu voice_started=%lu serial_started=%lu capture=disabled",
+                        LocalCompanionCycle::StateName(cycle.state()), static_cast<unsigned long>(cycle.started()),
+                        static_cast<unsigned long>(cycle.completed()), static_cast<unsigned long>(voice_cycles),
+                        static_cast<unsigned long>(serial_cycles));
                     break;
                 case 'd':
-                    if (wake_phase == 0) {
+                    if (cycle.state() == LocalCompanionState::Idle) {
                         SetFace(display, FaceState::Idle, "idle/test");
                         face_step = 1;
                         face_deadline = now + 2000000;
+                    } else {
+                        ESP_LOGI("LocalCompanion", "COMMAND_IGNORED command=d state=%s", LocalCompanionCycle::StateName(cycle.state()));
                     }
                     break;
-                case 't': audio.PlaySound(Lang::Sounds::OGG_POPUP); break;
+                case 't':
+                    if (cycle.state() == LocalCompanionState::Idle) {
+                        audio.PlaySound(Lang::Sounds::OGG_POPUP);
+                    } else {
+                        ESP_LOGI("LocalCompanion", "COMMAND_IGNORED command=t state=%s", LocalCompanionCycle::StateName(cycle.state()));
+                    }
+                    break;
                 case 'w': {
                     if (wifi_stop_pending) {
                         ESP_LOGW(kTag, "WIFI shutdown pending; wait for WIFI off");

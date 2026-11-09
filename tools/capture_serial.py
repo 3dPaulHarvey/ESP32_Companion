@@ -17,7 +17,7 @@ def main():
     parser.add_argument("--seconds", type=int, default=30, choices=range(1, 61), metavar="1..60")
     parser.add_argument("--reset", action="store_true", help="Reset device before capture")
     parser.add_argument("--name", default="boot", help="Log basename under logs/")
-    parser.add_argument("--send", choices=list("hdtwors"), help="Send one diagnostic menu command")
+    parser.add_argument("--send", choices=list("hndtwors"), help="Send one diagnostic menu command")
     parser.add_argument("--send-after", type=float, default=0.5, help="Seconds before sending the command")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_-]+", args.name):
@@ -65,6 +65,7 @@ def main():
         "AudioCodec:", "AfeWakeWord:", "Wake word detected:", "State:",
         "free heap", "SystemInfo: free sram:",
         "HardwareDiagnostics:", "MicDiagnostics:",
+        "LocalCompanion:",
         "Guru Meditation", "Backtrace:", "assert failed:",
     )
     blocked = ("password", "token", "authorization", "secret", "ssid", "transcript")
