@@ -6,7 +6,7 @@ Step 1 establishes a recoverable build of the supplied TechTalkies Xiaozhi firmw
 
 **Local diagnostic mode is available:** independent face/tone/microphone-level tests and repeated English wake acknowledgment, with Wi-Fi off at boot. [Diagnostic commands and test procedure](docs/DIAGNOSTICS.md).
 
-**Phase 2a adds explicit local states:** idle, wake detected, timed listening, local cue, and idle recovery. [State-cycle verification](docs/LOCAL_STATES.md). Bounded microphone-segment capture is the next increment.
+**Phase 2b adds bounded local microphone capture:** wake, two seconds of PCM, an end cue, and idle recovery. Capture and cancellation passed automated checks; three voice-triggered captures completed in serial. A display clarification is flashed; its physical retest and microphone calibration are deferred. [Current behavior and test procedure](docs/LOCAL_CAPTURE.md).
 
 - Working ESP-IDF project: `Source/xiaozhi-esp32-2.2.2/`.
 - Supplied reference: `_Reference_Code/` (untouched and excluded from Git).
@@ -28,6 +28,6 @@ Build/flash/monitor tasks are also available through **Terminal > Run Task**. Re
 
 To build or flash local diagnostics, add `-Profile diagnostics` to the wrapper command. The default profile remains `baseline`.
 
-Cloudflare and Gemini work is deferred until the hardware baseline passes. The baseline retains the original network, activation, and protocol behavior.
+Cloudflare/Gemini are not integrated or deployed. [Beginner overview and next steps](docs/CLOUD_OVERVIEW.md). The baseline retains the original network, activation, and protocol behavior.
 
 Based on [TechTalkies/Xiaozhi-for-XiaoESP32S3](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3), preserving the supplied licenses and attribution.

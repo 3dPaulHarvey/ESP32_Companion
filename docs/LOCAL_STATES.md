@@ -1,5 +1,7 @@
 # Local companion states — first increment
 
+Historical Phase 2a checkpoint: the current diagnostic profile now uses [bounded PCM capture](LOCAL_CAPTURE.md) instead of the timed LISTENING rehearsal described below. The `phase-2a-local-states-verified` tag preserves this earlier behavior.
+
 This is the first small Phase 2 change: replace the diagnostic loop's numeric wake phases with an explicit controller and verify its transitions. It still uses the cloud-disabled diagnostic profile.
 
 ```text

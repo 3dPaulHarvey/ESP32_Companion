@@ -7,6 +7,7 @@
 #include "board.h"
 #include "display.h"
 #include "local_companion_cycle.h"
+#include "audio/local_pcm_capture.h"
 
 #include <atomic>
 #include <cmath>
@@ -73,6 +74,10 @@ void PlayStartupTone(AudioCodec& codec) {
 }
 
 void SetFace(Display& display, FaceState face, const char* label) {
+    // Make the active capture window unambiguous on the small OLED.
+    // SetStatus takes its own display lock.
+    display.SetStatus(face == FaceState::Listening ? "LISTENING"
+        : (face == FaceState::Speaking ? "CUE" : "READY"));
     // The existing face timer runs on LVGL's task; serialize the state update.
     DisplayLockGuard guard(&display);
     display.SetFaceState(face);
@@ -80,7 +85,7 @@ void SetFace(Display& display, FaceState face, const char* label) {
 }
 
 void PrintHelp() {
-    ESP_LOGI(kTag, "COMMANDS h=help n=synthetic-cycle d=face-cycle t=local-cue w=WiFi-start o=WiFi-off r=disconnect/retry s=status");
+    ESP_LOGI(kTag, "COMMANDS h=help n=synthetic-cycle x=cancel-capture d=face-cycle t=local-cue w=WiFi-start o=WiFi-off r=disconnect/retry s=status");
 }
 
 const char* WifiEventName(WifiEvent event) {
@@ -166,7 +171,22 @@ const char* WifiEventName(WifiEvent event) {
     int face_step = 0;
     int64_t face_deadline = 0;
     int64_t memory_deadline = esp_timer_get_time() + 10000000;
-    ESP_LOGI("LocalCompanion", "STATE IDLE mode=timed-ui-rehearsal capture=disabled cloud=disabled");
+    bool capture_request_pending = false;
+    bool capture_start_failed = false;
+    bool wake_armed = true;
+    uint32_t capture_request_id = 0;
+    uint32_t completed_reported = 0;
+    const char* abort_reason = "none";
+    ESP_LOGI("LocalCompanion", "STATE IDLE mode=bounded-pcm-capture capture=local-2s cloud=disabled");
+
+    auto arm_wake = [&]() {
+        if (!capture_request_pending && !wake_armed) {
+            audio.EnableWakeWordDetection(true);
+            wake_armed = true;
+            ESP_LOGI(kTag, "WAKE_READY count=%lu WiFi=%s cloud=disabled",
+                static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off");
+        }
+    };
 
     auto on_transition = [&](LocalCompanionState previous) {
         ESP_LOGI("LocalCompanion", "STATE %s -> %s cycle=%lu source=%s",
@@ -175,11 +195,21 @@ const char* WifiEventName(WifiEvent event) {
         switch (cycle.state()) {
             case LocalCompanionState::WakeDetected:
                 audio.EnableWakeWordDetection(false);
+                wake_armed = false;
                 face_step = 0;
                 SetFace(display, FaceState::Listening, "wake-detected");
                 break;
             case LocalCompanionState::Listening:
-                SetFace(display, FaceState::Listening, "listening/timed-ui-test");
+                SetFace(display, FaceState::Listening, "listening/pcm-capture");
+                capture_request_id = cycle.started();
+                capture_request_pending = audio.BeginLocalCapture(capture_request_id);
+                capture_start_failed = !capture_request_pending;
+                if (capture_request_pending) {
+                    ESP_LOGI("LocalCompanion", "CAPTURE_BEGIN request=%lu target_samples=32000 bytes=64000 sample_rate=16000 warmup_samples=3200",
+                        static_cast<unsigned long>(capture_request_id));
+                } else {
+                    ESP_LOGE("LocalCompanion", "CAPTURE_START_FAILED request=%lu", static_cast<unsigned long>(capture_request_id));
+                }
                 break;
             case LocalCompanionState::Speaking:
                 SetFace(display, FaceState::Speaking, "speaking/local-cue");
@@ -187,23 +217,30 @@ const char* WifiEventName(WifiEvent event) {
                 break;
             case LocalCompanionState::Idle:
                 SetFace(display, FaceState::Idle, "idle/blink");
-                audio.EnableWakeWordDetection(true);
-                ESP_LOGI("LocalCompanion", "CYCLE_COMPLETE cycle=%lu completed=%lu source=%s voice_started=%lu serial_started=%lu",
-                    static_cast<unsigned long>(cycle.started()), static_cast<unsigned long>(cycle.completed()),
-                    cycle_source, static_cast<unsigned long>(voice_cycles), static_cast<unsigned long>(serial_cycles));
-                ESP_LOGI(kTag, "WAKE_READY count=%lu WiFi=%s cloud=disabled",
-                    static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off");
+                if (capture_request_pending) { audio.CancelLocalCapture(capture_request_id); }
+                if (cycle.completed() != completed_reported) {
+                    completed_reported = cycle.completed();
+                    ESP_LOGI("LocalCompanion", "CYCLE_COMPLETE cycle=%lu completed=%lu source=%s voice_started=%lu serial_started=%lu aborted=%lu",
+                        static_cast<unsigned long>(cycle.started()), static_cast<unsigned long>(cycle.completed()),
+                        cycle_source, static_cast<unsigned long>(voice_cycles), static_cast<unsigned long>(serial_cycles),
+                        static_cast<unsigned long>(cycle.aborted()));
+                } else {
+                    ESP_LOGW("LocalCompanion", "CYCLE_ABORTED cycle=%lu aborted=%lu source=%s reason=%s",
+                        static_cast<unsigned long>(cycle.started()), static_cast<unsigned long>(cycle.aborted()), cycle_source, abort_reason);
+                }
+                arm_wake();
                 break;
         }
     };
     auto begin_cycle = [&](int64_t now, const char* source) {
         const auto previous = cycle.state();
-        if (!cycle.BeginWake(now)) {
+        if (capture_request_pending || !cycle.BeginWake(now)) {
             ESP_LOGI("LocalCompanion", "WAKE_IGNORED source=%s state=%s", source,
                 LocalCompanionCycle::StateName(cycle.state()));
             return;
         }
         cycle_source = source;
+        abort_reason = "none";
         if (source[0] == 'v') { ++voice_cycles; } else { ++serial_cycles; }
         on_transition(previous);
     };
@@ -215,6 +252,35 @@ const char* WifiEventName(WifiEvent event) {
             wifi_stop_pending = false;
             ESP_LOGI(kTag, "WIFI off; wake remains local; cloud=disabled");
         }
+        LocalPcmCaptureResult capture_result;
+        if (audio.PollLocalCaptureResult(capture_result)) {
+            if (capture_request_pending && capture_result.request_id == capture_request_id) {
+                capture_request_pending = false;  // Worker has wiped/freed its buffer before publication.
+            }
+            if (cycle.state() == LocalCompanionState::Listening && capture_result.request_id == cycle.started()) {
+                const auto previous_capture_state = cycle.state();
+                const bool valid = capture_result.success && capture_result.status == LocalPcmCaptureStatus::Success
+                    && capture_result.samples == 32000 && capture_result.sample_rate == 16000;
+                if (valid && cycle.CaptureFinished(now)) {
+                    ESP_LOGI("LocalCompanion", "CAPTURE_COMPLETE request=%lu samples=%lu bytes=%lu duration_ms=2000 sample_rate=16000 elapsed_ms=%lu rms=%lu peak=%ld clipped=%lu",
+                        static_cast<unsigned long>(capture_result.request_id), static_cast<unsigned long>(capture_result.samples),
+                        static_cast<unsigned long>(capture_result.samples * sizeof(int16_t)),
+                        static_cast<unsigned long>(capture_result.elapsed_ms), static_cast<unsigned long>(capture_result.rms),
+                        static_cast<long>(capture_result.peak), static_cast<unsigned long>(capture_result.clipped));
+                    on_transition(previous_capture_state);
+                } else {
+                    abort_reason = valid ? "controller-timeout" : (capture_result.success ? "invalid-result" : LocalPcmCaptureStatusName(capture_result.status));
+                    ESP_LOGW("LocalCompanion", "CAPTURE_FAILED request=%lu samples=%lu status=%s",
+                        static_cast<unsigned long>(capture_result.request_id), static_cast<unsigned long>(capture_result.samples), abort_reason);
+                    if (cycle.Abort()) { on_transition(previous_capture_state); }
+                }
+            } else {
+                ESP_LOGW("LocalCompanion", "CAPTURE_RESULT_DISCARDED request=%lu state=%s status=%s",
+                    static_cast<unsigned long>(capture_result.request_id), LocalCompanionCycle::StateName(cycle.state()),
+                    LocalPcmCaptureStatusName(capture_result.status));
+                if (cycle.state() == LocalCompanionState::Idle) { arm_wake(); }
+            }
+        }
         const uint32_t observed_wakes = wake_count.load(std::memory_order_relaxed);
         if (observed_wakes != handled_wakes) {
             handled_wakes = observed_wakes;
@@ -224,7 +290,14 @@ const char* WifiEventName(WifiEvent event) {
         }
         const auto previous = cycle.state();
         if (cycle.Tick(now)) {
+            if (previous == LocalCompanionState::Listening) { abort_reason = "controller-watchdog"; }
             on_transition(previous);
+        }
+        if (capture_start_failed) {
+            capture_start_failed = false;
+            abort_reason = "capture-rejected";
+            const auto failed_state = cycle.state();
+            if (cycle.Abort()) { on_transition(failed_state); }
         }
         if (face_step != 0 && now >= face_deadline && cycle.state() == LocalCompanionState::Idle) {
             if (face_step == 1) { SetFace(display, FaceState::Listening, "listening/test"); }
@@ -239,17 +312,25 @@ const char* WifiEventName(WifiEvent event) {
             switch (command) {
                 case 'h': PrintHelp(); break;
                 case 'n': begin_cycle(now, "serial"); break;
+                case 'x':
+                    if (cycle.state() == LocalCompanionState::Listening && capture_request_pending) {
+                        audio.CancelLocalCapture(capture_request_id);
+                        ESP_LOGI("LocalCompanion", "CAPTURE_CANCEL_REQUEST request=%lu", static_cast<unsigned long>(capture_request_id));
+                    } else {
+                        ESP_LOGI("LocalCompanion", "COMMAND_IGNORED command=x state=%s", LocalCompanionCycle::StateName(cycle.state()));
+                    }
+                    break;
                 case 's':
                     PrintMemory();
                     ESP_LOGI(kTag, "STATUS wakes=%lu WiFi=%s connected=%d cloud=disabled",
                         static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off", wifi.IsConnected());
-                    ESP_LOGI("LocalCompanion", "STATUS state=%s started=%lu completed=%lu voice_started=%lu serial_started=%lu capture=disabled",
+                    ESP_LOGI("LocalCompanion", "STATUS state=%s started=%lu completed=%lu voice_started=%lu serial_started=%lu aborted=%lu capture=local-2s pending=%d",
                         LocalCompanionCycle::StateName(cycle.state()), static_cast<unsigned long>(cycle.started()),
                         static_cast<unsigned long>(cycle.completed()), static_cast<unsigned long>(voice_cycles),
-                        static_cast<unsigned long>(serial_cycles));
+                        static_cast<unsigned long>(serial_cycles), static_cast<unsigned long>(cycle.aborted()), capture_request_pending);
                     break;
                 case 'd':
-                    if (cycle.state() == LocalCompanionState::Idle) {
+                    if (cycle.state() == LocalCompanionState::Idle && !capture_request_pending) {
                         SetFace(display, FaceState::Idle, "idle/test");
                         face_step = 1;
                         face_deadline = now + 2000000;
@@ -258,7 +339,7 @@ const char* WifiEventName(WifiEvent event) {
                     }
                     break;
                 case 't':
-                    if (cycle.state() == LocalCompanionState::Idle) {
+                    if (cycle.state() == LocalCompanionState::Idle && !capture_request_pending) {
                         audio.PlaySound(Lang::Sounds::OGG_POPUP);
                     } else {
                         ESP_LOGI("LocalCompanion", "COMMAND_IGNORED command=t state=%s", LocalCompanionCycle::StateName(cycle.state()));

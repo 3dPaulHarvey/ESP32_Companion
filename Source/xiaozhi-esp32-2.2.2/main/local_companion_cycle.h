@@ -9,12 +9,13 @@ enum class LocalCompanionState {
     Speaking,
 };
 
-// A timed local state/UI rehearsal. This controller owns no audio, display,
-// network, or RTOS resources; the main task performs each state's effects.
+// Local cycle control. LISTENING waits for a capture result supplied by the
+// caller; its deadline is a watchdog, never a successful completion. The main
+// task owns audio/display effects and validates capture request IDs.
 class LocalCompanionCycle {
 public:
     static constexpr std::int64_t kWakeDurationUs = 100000;
-    static constexpr std::int64_t kListeningDurationUs = 400000;
+    static constexpr std::int64_t kListeningTimeoutUs = 4000000;
     static constexpr std::int64_t kSpeakingDurationUs = 800000;
 
     constexpr LocalCompanionCycle() = default;
@@ -22,6 +23,7 @@ public:
     constexpr LocalCompanionState state() const { return state_; }
     constexpr std::uint32_t started() const { return started_; }
     constexpr std::uint32_t completed() const { return completed_; }
+    constexpr std::uint32_t aborted() const { return aborted_; }
     constexpr std::int64_t deadline_us() const { return deadline_us_; }
 
     constexpr bool BeginWake(std::int64_t now_us) {
@@ -43,12 +45,10 @@ public:
         switch (state_) {
             case LocalCompanionState::WakeDetected:
                 state_ = LocalCompanionState::Listening;
-                deadline_us_ = now_us + kListeningDurationUs;
+                deadline_us_ = now_us + kListeningTimeoutUs;
                 return true;
             case LocalCompanionState::Listening:
-                state_ = LocalCompanionState::Speaking;
-                deadline_us_ = now_us + kSpeakingDurationUs;
-                return true;
+                return Abort();
             case LocalCompanionState::Speaking:
                 state_ = LocalCompanionState::Idle;
                 deadline_us_ = 0;
@@ -60,12 +60,35 @@ public:
         return false;
     }
 
+    // The caller also checks request ID and successful PCM sample count.
+    constexpr bool CaptureFinished(std::int64_t now_us) {
+        if (state_ != LocalCompanionState::Listening
+            || now_us < deadline_us_ - kListeningTimeoutUs || now_us >= deadline_us_) {
+            return false;
+        }
+        state_ = LocalCompanionState::Speaking;
+        deadline_us_ = now_us + kSpeakingDurationUs;
+        return true;
+    }
+
+    // Failed/cancelled cycles return to IDLE without claiming completion.
+    constexpr bool Abort() {
+        if (state_ == LocalCompanionState::Idle) {
+            return false;
+        }
+        state_ = LocalCompanionState::Idle;
+        deadline_us_ = 0;
+        ++aborted_;
+        return true;
+    }
+
     // Restore a fresh controller, including its counters.
     constexpr void Reset() {
         state_ = LocalCompanionState::Idle;
         deadline_us_ = 0;
         started_ = 0;
         completed_ = 0;
+        aborted_ = 0;
     }
 
     static constexpr const char* StateName(LocalCompanionState state) {
@@ -83,53 +106,36 @@ private:
     std::int64_t deadline_us_ = 0;
     std::uint32_t started_ = 0;
     std::uint32_t completed_ = 0;
+    std::uint32_t aborted_ = 0;
 };
 
 namespace local_companion_detail {
-// These checks also run when the header is compiled by the ESP32 toolchain.
-constexpr bool CoreInvariants() {
+// This small contract also runs when compiled by the ESP32 toolchain.
+constexpr bool CaptureWatchdogAndRetryInvariant() {
     LocalCompanionCycle cycle;
-    if (cycle.state() != LocalCompanionState::Idle || cycle.started() != 0 || cycle.completed() != 0) {
-        return false;
-    }
-    if (cycle.Tick(0) || !cycle.BeginWake(0) || cycle.BeginWake(1)) {
+    if (cycle.CaptureFinished(0) || cycle.Abort() || !cycle.BeginWake(0) || cycle.BeginWake(1)) {
         return false;
     }
     if (cycle.Tick(99999) || !cycle.Tick(100000) || cycle.state() != LocalCompanionState::Listening) {
         return false;
     }
-    if (cycle.Tick(499999) || !cycle.Tick(500000) || cycle.state() != LocalCompanionState::Speaking) {
+    // Time alone cannot turn LISTENING into a successful speaking state.
+    if (cycle.Tick(2100000) || cycle.CaptureFinished(4100000) || !cycle.Tick(4100000)) {
         return false;
     }
-    if (cycle.completed() != 0 || cycle.Tick(1299999) || !cycle.Tick(1300000)) {
+    if (cycle.state() != LocalCompanionState::Idle || cycle.completed() != 0 || cycle.aborted() != 1) {
         return false;
     }
-    if (cycle.state() != LocalCompanionState::Idle || cycle.started() != 1 || cycle.completed() != 1) {
+    if (!cycle.BeginWake(5000000) || !cycle.Tick(5100000) || !cycle.CaptureFinished(7100000)) {
         return false;
     }
-    cycle.Reset();
-    if (!cycle.BeginWake(0) || !cycle.Tick(1000000)) {
+    if (cycle.Tick(7899999) || !cycle.Tick(7900000)) {
         return false;
     }
-    return cycle.state() == LocalCompanionState::Listening
-        && cycle.deadline_us() == 1400000 && !cycle.Tick(1000000) && cycle.completed() == 0;
-}
-
-constexpr bool TenCompleteCycles() {
-    LocalCompanionCycle cycle;
-    for (std::uint32_t i = 0; i < 10; ++i) {
-        const std::int64_t start = static_cast<std::int64_t>(i) * 2000000;
-        if (!cycle.BeginWake(start) || !cycle.Tick(start + 100000)
-            || !cycle.Tick(start + 500000) || !cycle.Tick(start + 1300000)) {
-            return false;
-        }
-        if (cycle.state() != LocalCompanionState::Idle || cycle.started() != i + 1 || cycle.completed() != i + 1) {
-            return false;
-        }
-    }
-    return true;
+    return cycle.state() == LocalCompanionState::Idle && cycle.started() == 2
+        && cycle.completed() == 1 && cycle.aborted() == 1;
 }
 }  // namespace local_companion_detail
 
-static_assert(local_companion_detail::CoreInvariants(), "Local companion transition invariants failed");
-static_assert(local_companion_detail::TenCompleteCycles(), "Local companion repeated-cycle invariants failed");
+static_assert(local_companion_detail::CaptureWatchdogAndRetryInvariant(),
+    "Local capture watchdog/retry invariants failed");

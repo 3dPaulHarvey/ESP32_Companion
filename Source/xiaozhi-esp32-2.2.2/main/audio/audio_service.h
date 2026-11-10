@@ -23,6 +23,9 @@
 #include "processors/audio_debugger.h"
 #include "wake_word.h"
 #include "protocol.h"
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+#include "local_pcm_capture.h"
+#endif
 
 
 /*
@@ -51,6 +54,9 @@
 #define AS_EVENT_WAKE_WORD_RUNNING          (1 << 1)
 #define AS_EVENT_AUDIO_PROCESSOR_RUNNING    (1 << 2)
 #define AS_EVENT_PLAYBACK_NOT_EMPTY         (1 << 3)
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+#define AS_EVENT_LOCAL_CAPTURE_RUNNING      (1 << 4)
+#endif
 
 #define AS_OPUS_GET_FRAME_DRU_ENUM(duration_ms)                   \
     ((duration_ms) == 5 ? ESP_OPUS_ENC_FRAME_DURATION_5_MS :      \
@@ -133,6 +139,11 @@ public:
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+    bool BeginLocalCapture(uint32_t request_id);
+    bool PollLocalCaptureResult(LocalPcmCaptureResult& result);
+    void CancelLocalCapture(uint32_t request_id);
+#endif
 
 private:
     AudioCodec* codec_ = nullptr;
@@ -179,6 +190,18 @@ private:
     bool voice_detected_ = false;
     bool service_stopped_ = true;
     bool audio_input_need_warmup_ = false;
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+    // The input task owns all PCM memory. These fields transfer only request,
+    // cancellation and completed metadata between that task and the UI task.
+    std::mutex local_capture_mutex_;
+    uint32_t local_capture_request_id_ = 0;
+    uint32_t local_capture_generation_ = 0;
+    bool local_capture_requested_ = false;
+    bool local_capture_cancel_requested_ = false;
+    bool local_capture_result_ready_ = false;
+    LocalPcmCaptureResult local_capture_result_;
+    void RunLocalCapture();
+#endif
 
     esp_timer_handle_t audio_power_timer_ = nullptr;
     std::chrono::steady_clock::time_point last_input_time_;

@@ -60,6 +60,8 @@ Source inconsistencies found during inspection:
 
 The existing OLED face updates every 60 ms. `SetFaceState(FaceState::Idle/Listening/Speaking)` selects the expression; `SetEmotion()` is a no-op in this fork. Use the existing face implementation in diagnostics.
 
+Phase 2b holds a steady listening pose by suppressing random blinks during Listening and resetting the blink on state changes. It also clamps listening-eye dimensions to positive values. Diagnostic status labels show READY, LISTENING and CUE. This clarification was built/flashed after the user reported that the earlier listening pose did not hold; physical confirmation is pending because the user deferred testing due to background noise. Audio capture timing passed independently in serial.
+
 The first baseline boot loaded `wn9_nihaoxiaozhi_tts` from the generic S3 defaults. The user does not speak Chinese, so its phrase test was inconclusive. The development profile now disables that model and selects bundled English **“Hi, ESP”** (`CONFIG_SR_WN_WN9_HIESP=y`), spoken “Hi, E-S-P.” Runtime wake detection is selected from models loaded from the **assets partition**, not solely from a Kconfig option. Missing or unflashed assets can leave wake detection unavailable; confirm the new model name in serial before testing it.
 
 Relevant source paths, relative to the firmware root:

@@ -142,7 +142,12 @@ bool OledDisplay::Lock(int timeout_ms) { return lvgl_port_lock(timeout_ms); }
 
 void OledDisplay::Unlock() { lvgl_port_unlock(); }
 
-void OledDisplay::SetFaceState(FaceState state) { face_state_ = state; }
+void OledDisplay::SetFaceState(FaceState state) {
+    if (face_state_ != state) {
+        blink_phase_ = 0;
+    }
+    face_state_ = state;
+}
 
 void OledDisplay::SetChatMessage(const char* role, const char* content) {
     /* DisplayLockGuard lock(this);
@@ -189,10 +194,10 @@ void OledDisplay::IdleBehavior(int base_eye_height) {
 
 void OledDisplay::ListeningBehavior(int base_eye_height) {
     int right_h = base_eye_height;
-    int right_w = right_h * 0.65;  // slightly oval
+    int right_w = std::max(1, static_cast<int>(right_h * 0.65));  // slightly oval
 
-    int left_h = base_eye_height - 2;
-    int left_w = left_h * 0.65;  // slightly oval
+    int left_h = std::max(1, base_eye_height - 2);
+    int left_w = std::max(1, static_cast<int>(left_h * 0.65));  // slightly oval
 
     lv_obj_set_size(left_eye_, left_w, left_h);
     lv_obj_set_size(right_eye_, right_w, right_h);
@@ -249,7 +254,11 @@ void OledDisplay::UpdateFace() {
     DisplayLockGuard lock(this);
 
     // --- Random blink trigger ---
-    if (blink_phase_ == 0) {
+    // A steady listening pose visibly spans the entire microphone capture.
+    // Keep the existing random blink in the other expressions.
+    if (face_state_ == FaceState::Listening) {
+        blink_phase_ = 0;
+    } else if (blink_phase_ == 0) {
         if (rand() % 120 == 0) {  // random blink
             blink_phase_ = 1;
         }

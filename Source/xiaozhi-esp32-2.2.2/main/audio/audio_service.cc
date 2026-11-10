@@ -5,6 +5,7 @@
 #if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
 #include <cmath>
 #include <cstdint>
+#include <esp_heap_caps.h>
 #endif
 
 #define RATE_CVT_CFG(_src_rate, _dest_rate, _channel)        \
@@ -130,6 +131,9 @@ void AudioService::Initialize(AudioCodec* codec) {
 void AudioService::Start() {
     service_stopped_ = false;
     xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+    xEventGroupClearBits(event_group_, AS_EVENT_LOCAL_CAPTURE_RUNNING);
+#endif
 
     esp_timer_start_periodic(audio_power_timer_, 1000000);
 
@@ -174,6 +178,13 @@ void AudioService::Start() {
 void AudioService::Stop() {
     esp_timer_stop(audio_power_timer_);
     service_stopped_ = true;
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+    {
+        std::lock_guard<std::mutex> capture_lock(local_capture_mutex_);
+        local_capture_cancel_requested_ = local_capture_requested_;
+    }
+    xEventGroupSetBits(event_group_, AS_EVENT_LOCAL_CAPTURE_RUNNING);
+#endif
     xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
         AS_EVENT_WAKE_WORD_RUNNING |
         AS_EVENT_AUDIO_PROCESSOR_RUNNING);
@@ -278,10 +289,24 @@ void AudioService::AudioInputTask() {
 #endif
 
     while (true) {
-        EventBits_t bits = xEventGroupWaitBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
-            AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING,
+        EventBits_t input_mask = AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING;
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+        input_mask |= AS_EVENT_LOCAL_CAPTURE_RUNNING;
+#endif
+        EventBits_t bits = xEventGroupWaitBits(event_group_, input_mask,
             pdFALSE, pdFALSE, portMAX_DELAY);
 
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+        // This same task remains the sole reader. Local capture never enters
+        // the Opus, send, audio-testing, or replay queues.
+        if (bits & AS_EVENT_LOCAL_CAPTURE_RUNNING) {
+            RunLocalCapture();
+            if (service_stopped_) {
+                break;
+            }
+            continue;
+        }
+#endif
         if (service_stopped_) {
             break;
         }
@@ -347,6 +372,156 @@ void AudioService::AudioInputTask() {
 
     ESP_LOGW(TAG, "Audio input task stopped");
 }
+
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+bool AudioService::BeginLocalCapture(uint32_t request_id) {
+    std::lock_guard<std::mutex> lock(local_capture_mutex_);
+    if (service_stopped_ || codec_ == nullptr || local_capture_requested_ || local_capture_result_ready_) {
+        return false;
+    }
+    if (codec_->input_sample_rate() != LocalPcmCaptureBuffer::kSampleRate || codec_->input_channels() != 1) {
+        return false;
+    }
+    const EventBits_t bits = xEventGroupGetBits(event_group_);
+    if (bits & (AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING)) {
+        return false;
+    }
+    local_capture_request_id_ = request_id;
+    ++local_capture_generation_;
+    local_capture_cancel_requested_ = false;
+    local_capture_requested_ = true;
+    xEventGroupSetBits(event_group_, AS_EVENT_LOCAL_CAPTURE_RUNNING);
+    return true;
+}
+
+bool AudioService::PollLocalCaptureResult(LocalPcmCaptureResult& result) {
+    std::lock_guard<std::mutex> lock(local_capture_mutex_);
+    if (!local_capture_result_ready_) {
+        return false;
+    }
+    result = local_capture_result_;
+    local_capture_result_ready_ = false;
+    return true;
+}
+
+void AudioService::CancelLocalCapture(uint32_t request_id) {
+    std::lock_guard<std::mutex> lock(local_capture_mutex_);
+    if (local_capture_requested_ && local_capture_request_id_ == request_id) {
+        local_capture_cancel_requested_ = true;
+    }
+}
+
+void AudioService::RunLocalCapture() {
+    uint32_t request_id;
+    uint32_t generation;
+    {
+        std::lock_guard<std::mutex> lock(local_capture_mutex_);
+        if (!local_capture_requested_) {
+            xEventGroupClearBits(event_group_, AS_EVENT_LOCAL_CAPTURE_RUNNING);
+            return;
+        }
+        request_id = local_capture_request_id_;
+        generation = local_capture_generation_;
+    }
+
+    const int64_t started_us = esp_timer_get_time();
+    LocalPcmCaptureResult result;
+    result.request_id = request_id;
+    {
+        // Every exit from this scope erases and frees the worker-owned segment
+        // before completed metadata becomes visible to the UI task.
+        struct CaptureStorage {
+            int16_t* data = static_cast<int16_t*>(heap_caps_malloc(
+                LocalPcmCaptureBuffer::kBufferBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+            ~CaptureStorage() {
+                if (data != nullptr) {
+                    volatile int16_t* wipe = data;
+                    for (size_t i = 0; i < LocalPcmCaptureBuffer::kTargetSamples; ++i) {
+                        wipe[i] = 0;
+                    }
+                    heap_caps_free(data);
+                }
+            }
+        } storage;
+        LocalPcmCaptureBuffer capture(storage.data, LocalPcmCaptureBuffer::kTargetSamples);
+        LocalPcmCaptureStatus status = LocalPcmCaptureStatus::Success;
+        if (!capture.valid()) {
+            status = LocalPcmCaptureStatus::AllocationFailed;
+        } else if (codec_ == nullptr || codec_->input_sample_rate() != LocalPcmCaptureBuffer::kSampleRate ||
+                   codec_->input_channels() != 1) {
+            status = LocalPcmCaptureStatus::UnsupportedFormat;
+        } else {
+            if (!codec_->input_enabled()) {
+                esp_timer_stop(audio_power_timer_);
+                esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+                codec_->EnableInput(true);
+            }
+            int16_t chunk[320];
+            while (!capture.complete()) {
+                {
+                    std::lock_guard<std::mutex> lock(local_capture_mutex_);
+                    if (service_stopped_) {
+                        status = LocalPcmCaptureStatus::ServiceStopped;
+                    } else if (local_capture_generation_ != generation || local_capture_cancel_requested_) {
+                        status = LocalPcmCaptureStatus::Cancelled;
+                    }
+                }
+                if (status != LocalPcmCaptureStatus::Success) {
+                    break;
+                }
+                if (esp_timer_get_time() - started_us >= 3500000) {
+                    status = LocalPcmCaptureStatus::Timeout;
+                    break;
+                }
+                const size_t requested = std::min<size_t>(320, capture.remaining_input_samples());
+                size_t received = 0;
+                const esp_err_t read_result = codec_->ReadLocalCaptureInput(chunk, requested, received, 100);
+                if (read_result == ESP_ERR_NOT_SUPPORTED) {
+                    status = LocalPcmCaptureStatus::UnsupportedFormat;
+                    break;
+                }
+                if (read_result == ESP_ERR_NO_MEM) {
+                    status = LocalPcmCaptureStatus::AllocationFailed;
+                    break;
+                }
+                if ((read_result != ESP_OK && read_result != ESP_ERR_TIMEOUT) || received > requested) {
+                    status = LocalPcmCaptureStatus::ReadError;
+                    break;
+                }
+                if (received > 0) {
+                    capture.Feed(chunk, received);
+                    last_input_time_ = std::chrono::steady_clock::now();
+                    ++debug_statistics_.input_count;
+                } else {
+                    // A finite read with no data is retried until the service
+                    // watchdog/cancel request; do not terminate the input task.
+                    vTaskDelay(pdMS_TO_TICKS(1));
+                }
+                if (esp_timer_get_time() - started_us >= 3500000) {
+                    status = LocalPcmCaptureStatus::Timeout;
+                    break;
+                }
+            }
+        }
+        result = capture.Result(request_id, status, static_cast<uint32_t>((esp_timer_get_time() - started_us) / 1000));
+    }
+
+    std::lock_guard<std::mutex> lock(local_capture_mutex_);
+    if (local_capture_requested_ && local_capture_generation_ == generation) {
+        // A cancellation arriving after the final read but before publication
+        // still receives a failure acknowledgment, with honest sample count.
+        if (service_stopped_ || local_capture_cancel_requested_) {
+            result.success = false;
+            result.status = service_stopped_ ? LocalPcmCaptureStatus::ServiceStopped : LocalPcmCaptureStatus::Cancelled;
+        }
+        xEventGroupClearBits(event_group_, AS_EVENT_LOCAL_CAPTURE_RUNNING);
+        local_capture_result_ = result;
+        local_capture_result_ready_ = true;
+        local_capture_requested_ = false;
+        local_capture_cancel_requested_ = false;
+    }
+}
+#endif
 
 void AudioService::AudioOutputTask() {
     while (true) {
@@ -788,6 +963,14 @@ void AudioService::PlaySound(const std::string_view& ogg) {
 }
 
 bool AudioService::IsIdle() {
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+    {
+        std::lock_guard<std::mutex> capture_lock(local_capture_mutex_);
+        if (local_capture_requested_) {
+            return false;
+        }
+    }
+#endif
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
     return audio_encode_queue_.empty() && audio_decode_queue_.empty() && audio_playback_queue_.empty() && audio_testing_queue_.empty();
 }

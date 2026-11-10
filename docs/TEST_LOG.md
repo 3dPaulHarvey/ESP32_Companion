@@ -127,3 +127,29 @@ The first noisy trial remains recorded as a user-reported failure; ten accepted 
 Before the final reboot, status confirmed `IDLE started=32 completed=32 voice_started=21 serial_started=11`. All captured cycles completed, and no panic/assert/watchdog appeared. Lowest reported internal heap across these captures was 71,055 bytes during the Wi-Fi test; this is a bounded functional check, not a long soak. Final capture `logs/phase2a-final-reboot-summary.log` confirms the device is left idle on COM26 with Wi-Fi off and serial capture closed. Existing local editor settings were preserved outside the implementation commits.
 
 **Phase 2a state/UI checkpoint verified.** Phase 2 remains incomplete until bounded PCM capture (and its level/headroom checks) is implemented and verified. Original baseline and prior diagnostic recovery images remain available.
+
+## Phase 2b: bounded PCM capture (implemented 2026-11-09; checkpoint recorded 2026-11-10)
+
+LISTENING now captures a real, bounded 16 kHz mono int16 segment in the existing sole microphone input task. It discards 3,200 initial samples and retains exactly 32,000 samples (64,000 bytes, two seconds) in PSRAM. The worker wipes/frees that buffer before publishing measurements. No raw audio file, replay, transcription or cloud request is produced. Success drives SPEAKING/end cue; cancellation or failure aborts without claiming a completed cycle. Worker/controller watchdogs and request IDs bound recovery and reject stale results.
+
+| Check | Result |
+|---|---|
+| Target | COM26 USB identity matched development board `44:BD:8D:EC:38:E0` before flash; no other board flashed |
+| Portable tests | PASS: strict C++17 controller tests and PCM buffer tests, including exact counts, discard, short chunks, extrema, cancellation/watchdog boundaries and retry |
+| Builds | PASS: diagnostics and baseline, including the later display correction; corrected diagnostic app 2,541,488 bytes (`0x26c7b0`), 17% app-partition headroom; baseline 2,614,032 bytes (`0x27e310`), 15% headroom |
+| Flash | PASS: initial and display-corrected diagnostic images written and hashes verified on COM26 |
+| Initial boot | PASS: bounded-pcm-capture banner, English wake model, idle, Wi-Fi off, cloud disabled, zero counters/pending |
+| Cancellation/recovery | PASS: request 1 cancelled, aborted=1, cleanup acknowledged and wake re-armed; no false success |
+| Automated captures | PASS: requests 2–4 each 32,000 samples / 64,000 bytes, elapsed 2,129–2,132 ms including discard; final IDLE started=4 completed=3 aborted=1 pending=0; busy-command guards passed |
+| Voice-triggered capture | Serial PASS: three genuine wake requests 5–7, each exact sample count, elapsed 2,120–2,127 ms, success/cue/idle/re-arm; completed=6, voice_started=3, serial_started=4, aborted=1 |
+| Physical listening display | User reported that listening expression did not hold. Shared random blink and a negative eye-height frame were found; fixed by holding Listening steady, resetting blinks, clamping dimensions and adding READY/LISTENING/CUE status. Correction built/flashed, but **physical retest pending** |
+| Microphone quality | Voice captures RMS 1,362 / 6,634 / 6,991, peaks 5,020 / 32,767 / 32,767, clipped samples 0 / 92 / 117. Counts prove capture, not intelligibility; noisy environment and existing headroom remain unresolved. Conversion/gain unchanged |
+| User deferral | User requested stopping physical testing due to background noise and testing/adjusting the mic later. No further spoken test was requested |
+| Current availability | COM26 absent at the 2026-11-10 status check; no post-correction boot/physical observation obtained |
+| Cloud | Overview prepared only. No Worker deployment, Gemini key, temporary token or AI conversation is implemented |
+
+Evidence remains under ignored `logs/`: `phase2b-build.log`, `phase2b-baseline-build.log`, `phase2b-flash.log`, `phase2b-boot-summary.log`, `phase2b-cancel-recovery-private.log`, `phase2b-spoken-captures-summary.log`, and `phase2b-face-{build,baseline-build,flash}.log`. Existing vendor macro/unused OLED variable warnings remain; builds succeeded. No panic/assert was observed in the bounded capture tests. Phase 2a network recovery is not a substitute for a new capture-under-network-interruption test; that additional check was not run.
+
+Initial Phase 2b artifacts remain in `recovery/2026-11-09-COM26/phase-2b-local-capture/`; the later display-corrected images/config/manifest are saved separately in `phase-2b-local-capture-display/`. Original full-flash backup and prior checkpoints remain preserved. See [LOCAL_CAPTURE.md](LOCAL_CAPTURE.md) for expected interaction and [CLOUD_OVERVIEW.md](CLOUD_OVERVIEW.md) for the subsequent cloud stage.
+
+**Implemented, with physical retest pending.** On the next quiet-room test, confirm LISTENING and steady eyes for the capture window, CUE/end sound, then READY/blinking eyes. Test and calibrate microphone headroom before voice streaming. Do not mark the complete Phase 2 exit gate or cloud conversation as passed yet.

@@ -1,10 +1,24 @@
 #include "no_audio_codec.h"
 
 #include <esp_log.h>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+#include <memory>
+#include <new>
+#endif
 
 #define TAG "NoAudioCodec"
+
+namespace {
+void ConvertInputPcm(const int32_t* input, int16_t* output, size_t samples) {
+    for (size_t i = 0; i < samples; ++i) {
+        const int32_t value = input[i] >> 12;
+        output[i] = value > INT16_MAX ? INT16_MAX : value < -INT16_MAX ? -INT16_MAX : static_cast<int16_t>(value);
+    }
+}
+}  // namespace
 
 NoAudioCodec::~NoAudioCodec() {
     if (rx_handle_ != nullptr) {
@@ -247,12 +261,34 @@ int NoAudioCodec::Read(int16_t* dest, int samples) {
     }
 
     samples = bytes_read / sizeof(int32_t);
-    for (int i = 0; i < samples; i++) {
-        int32_t value = bit32_buffer[i] >> 12;
-        dest[i] = (value > INT16_MAX) ? INT16_MAX : (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
-    }
+    ConvertInputPcm(bit32_buffer.data(), dest, samples);
     return samples;
 }
+
+#if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+esp_err_t NoAudioCodec::ReadLocalCaptureInput(int16_t* dest, size_t capacity_samples,
+                                            size_t& samples_read, uint32_t timeout_ms) {
+    samples_read = 0;
+    // Keep this diagnostic operation small and bounded, including its temporary.
+    if (dest == nullptr || capacity_samples == 0 || capacity_samples > 320 || timeout_ms > 100) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    std::unique_ptr<int32_t[]> raw(new (std::nothrow) int32_t[capacity_samples]);
+    if (!raw) {
+        return ESP_ERR_NO_MEM;
+    }
+    size_t bytes_read = 0;
+    const esp_err_t result = i2s_channel_read(rx_handle_, raw.get(), capacity_samples * sizeof(int32_t),
+                                             &bytes_read, timeout_ms);
+    if (result != ESP_OK && result != ESP_ERR_TIMEOUT) {
+        return result;
+    }
+    // A timeout can contain real partial data; report only complete I2S words.
+    samples_read = std::min(bytes_read / sizeof(int32_t), capacity_samples);
+    ConvertInputPcm(raw.get(), dest, samples_read);
+    return result;
+}
+#endif
 
 // Delegating constructor: calls the main constructor with default slot mask
 NoAudioCodecSimplexPdm::NoAudioCodecSimplexPdm(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, gpio_num_t mic_sck, gpio_num_t mic_din) 
