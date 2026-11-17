@@ -6,7 +6,7 @@ Step 1 establishes a recoverable build of the supplied TechTalkies Xiaozhi firmw
 
 **Local diagnostic mode is available:** independent face/tone/microphone-level tests and repeated English wake acknowledgment, with Wi-Fi off at boot. [Diagnostic commands and test procedure](docs/DIAGNOSTICS.md).
 
-**Phase 2b adds bounded local microphone capture:** wake, two seconds of PCM, an end cue, and idle recovery. Capture and cancellation passed automated checks; three voice-triggered captures completed in serial. A display clarification is flashed; its physical retest and microphone calibration are deferred. [Current behavior and test procedure](docs/LOCAL_CAPTURE.md).
+**Phase 2b adds bounded local microphone capture:** wake, two seconds of PCM, an end cue, and idle recovery. Capture and cancellation passed automated checks; three voice-triggered captures completed in serial. The user confirms the updated physical behavior works in a follow-up test on 2026-11-17. Microphone headroom calibration remains open before voice streaming. [Current behavior and test procedure](docs/LOCAL_CAPTURE.md).
 
 - Working ESP-IDF project: `Source/xiaozhi-esp32-2.2.2/`.
 - Supplied reference: `_Reference_Code/` (untouched and excluded from Git).

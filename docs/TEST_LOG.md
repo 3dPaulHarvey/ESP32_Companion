@@ -153,3 +153,9 @@ Evidence remains under ignored `logs/`: `phase2b-build.log`, `phase2b-baseline-b
 Initial Phase 2b artifacts remain in `recovery/2026-11-09-COM26/phase-2b-local-capture/`; the later display-corrected images/config/manifest are saved separately in `phase-2b-local-capture-display/`. Original full-flash backup and prior checkpoints remain preserved. See [LOCAL_CAPTURE.md](LOCAL_CAPTURE.md) for expected interaction and [CLOUD_OVERVIEW.md](CLOUD_OVERVIEW.md) for the subsequent cloud stage.
 
 **Implemented, with physical retest pending.** On the next quiet-room test, confirm LISTENING and steady eyes for the capture window, CUE/end sound, then READY/blinking eyes. Test and calibrate microphone headroom before voice streaming. Do not mark the complete Phase 2 exit gate or cloud conversation as passed yet.
+
+## 2026-11-17 — Physical follow-up
+
+The user reports: “the recent irl test is working well” and requests proceeding with development. Record the corrected listening/status/cue/idle interaction as a user-confirmed physical pass. This supersedes the physical-retest deferral above; no fresh serial log, exact cycle count, acoustic measurement or new firmware flash accompanies this report.
+
+The existing automated capture/cancellation results and three voice-triggered sample-count results remain the measured evidence. Microphone headroom calibration, the capture-under-network-interruption check and the full repeated-capture exit sequence remain open. Proceed with the independent local Worker health-endpoint preparation; this does not establish a Gemini connection or close those hardware checks.
