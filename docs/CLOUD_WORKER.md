@@ -4,6 +4,19 @@ Phase 3a is verified locally on 2026-11-17. The Worker is a small web service th
 
 The current health response means the Worker program is running. It does not test device authentication, Gemini availability, quotas or a voice conversation. Cloud hosting and Gemini integration remain subsequent steps.
 
+## Dashboard deployment in progress
+
+The user created `esp32-companion-control` through **Create app → Start with Hello World! → Deploy**. Its public address is **https://esp32-companion-control.stiener.workers.dev/**. A direct HTTPS request on 2026-11-17 returned `200` and `Hello World!`, confirming the starter is online. The tested health handler has not yet been verified at that address.
+
+To publish the prepared handler from the dashboard editor:
+
+1. Open this project's `cloudflare-worker/src/index.js` in VS Code. Select all and copy its contents.
+2. Click inside the Cloudflare editor's `worker.js` code area. Select all and paste, replacing the entire starter program.
+3. Click **Deploy** at the top right.
+4. Open **https://esp32-companion-control.stiener.workers.dev/health** in a browser tab. Expect `{"status":"ok","service":"esp32-companion","api_version":1}`.
+
+The health handler uses the `/health` route. After it is published, the bare `/` address returns `404` with `{"error":"not_found"}` as designed. The dashboard filename `worker.js` may differ from our local `src/index.js`; use the same program contents. Hosted GET/HEAD/error-route verification is the next exit check after the user deploys it. No Wrangler account authorization is configured by this manual dashboard workflow.
+
 ## Try it on this PC
 
 From the project root in PowerShell:

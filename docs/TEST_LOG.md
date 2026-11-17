@@ -181,3 +181,9 @@ The first test attempt found that the installed Miniflare 5 API has a different 
 Logs: `logs/worker-health-install.log`, `worker-health-tests.log`, `worker-health-bundle.log`, `worker-health-http.log`. The automatic tests dispose their runtime; the development server is stopped after the manual HTTP probe. No Gemini key is needed for the current code. Existing user editor settings remain untouched and unstaged.
 
 **Local health checkpoint passed.** Next: account setup and hosted HTTPS health verification, then device authentication/request limits and Gemini token support. The endpoint reports that this Worker is alive; it does not report end-to-end robot or Gemini readiness. Commands and platform notes are in [CLOUD_WORKER.md](CLOUD_WORKER.md).
+
+## 2026-11-17 — Hosted starter created through dashboard
+
+The user is registered/logged into Cloudflare and followed the dashboard flow to deploy the Hello World starter as `esp32-companion-control`. The supplied editor screenshot shows the starter active, and the user confirms its Visit link works. An independent HTTPS GET to `https://esp32-companion-control.stiener.workers.dev/` returned `200`, `text/plain;charset=UTF-8`, and `Hello World!`. Evidence: `logs/worker-hosted-starter-http.log`.
+
+Computer/browser control was unavailable, so creation was performed by the user with screen-by-screen guidance. No agent UI mutation or Wrangler account authorization was performed. The next manual step is replacing dashboard `worker.js` with the already-tested local `cloudflare-worker/src/index.js`, deploying, and verifying `/health` plus the hosted method/error behavior. **Hosted starter passed; hosted health checkpoint remains pending.** No Gemini key or session endpoint is configured.
