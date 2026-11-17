@@ -1,12 +1,12 @@
-# Local Worker health checkpoint
+# Worker health checkpoint
 
-Phase 3a is verified locally on 2026-11-17. The Worker is a small web service that will later authenticate the robot and issue Gemini session access. Its first route, `/health`, proves that the service runs and responds correctly.
+Phase 3a is verified locally and on the hosted HTTPS address on 2026-11-17. The Worker is a small web service that will later authenticate the robot and issue Gemini session access. Its first route, `/health`, proves that the service runs and responds correctly.
 
-The current health response means the Worker program is running. It does not test device authentication, Gemini availability, quotas or a voice conversation. Cloud hosting and Gemini integration remain subsequent steps.
+The current health response means the Worker program is running. It does not test device authentication, Gemini availability, quotas or a voice conversation. Device authentication and Gemini integration remain subsequent steps.
 
-## Dashboard deployment in progress
+## Verified dashboard deployment
 
-The user created `esp32-companion-control` through **Create app → Start with Hello World! → Deploy**. Its public address is **https://esp32-companion-control.stiener.workers.dev/**. A direct HTTPS request on 2026-11-17 returned `200` and `Hello World!`, confirming the starter is online. The tested health handler has not yet been verified at that address.
+The user created `esp32-companion-control` through **Create app → Start with Hello World! → Deploy**, then replaced the starter with our prepared handler. Its public health address is **https://esp32-companion-control.stiener.workers.dev/health**. The user confirms it works; independent HTTPS GET/HEAD, unsupported-method and unknown-route checks all passed on 2026-11-17.
 
 To publish the prepared handler from the dashboard editor:
 
@@ -15,7 +15,7 @@ To publish the prepared handler from the dashboard editor:
 3. Click **Deploy** at the top right.
 4. Open **https://esp32-companion-control.stiener.workers.dev/health** in a browser tab. Expect `{"status":"ok","service":"esp32-companion","api_version":1}`.
 
-The health handler uses the `/health` route. After it is published, the bare `/` address returns `404` with `{"error":"not_found"}` as designed. The dashboard filename `worker.js` may differ from our local `src/index.js`; use the same program contents. Hosted GET/HEAD/error-route verification is the next exit check after the user deploys it. No Wrangler account authorization is configured by this manual dashboard workflow.
+The health handler uses the `/health` route. The bare `/` address returns `404` with `{"error":"not_found"}` as designed. The dashboard filename `worker.js` may differ from our local `src/index.js`; use the same program contents. No Wrangler account authorization is configured by this manual dashboard workflow. The local Node development server can stay stopped; the hosted Worker runs independently.
 
 ## Try it on this PC
 
@@ -73,8 +73,8 @@ Cloudflare currently lists Windows 11 as the supported Windows platform for Wran
 
 ## Next checkpoint
 
-1. Create or sign into a Cloudflare account, then publish this health-only Worker and verify its HTTPS URL.
-2. Add device authentication and request limits; verify rejected requests before implementing session issuance.
+1. **Complete:** publish the health-only Worker and verify its HTTPS URL.
+2. Add a device credential as an encrypted Worker secret, then implement a small authentication check. Missing/wrong credentials must be rejected, and the correct credential must succeed before adding session issuance or Gemini. Add request limits before enabling provider calls.
 3. Verify Gemini Live's current model/token support and quota, then store the permanent key as a Worker secret and test token issuance.
 4. Prove a desktop Gemini connection before joining it to the ESP32. Finish microphone headroom calibration before voice streaming.
 

@@ -187,3 +187,18 @@ Logs: `logs/worker-health-install.log`, `worker-health-tests.log`, `worker-healt
 The user is registered/logged into Cloudflare and followed the dashboard flow to deploy the Hello World starter as `esp32-companion-control`. The supplied editor screenshot shows the starter active, and the user confirms its Visit link works. An independent HTTPS GET to `https://esp32-companion-control.stiener.workers.dev/` returned `200`, `text/plain;charset=UTF-8`, and `Hello World!`. Evidence: `logs/worker-hosted-starter-http.log`.
 
 Computer/browser control was unavailable, so creation was performed by the user with screen-by-screen guidance. No agent UI mutation or Wrangler account authorization was performed. The next manual step is replacing dashboard `worker.js` with the already-tested local `cloudflare-worker/src/index.js`, deploying, and verifying `/health` plus the hosted method/error behavior. **Hosted starter passed; hosted health checkpoint remains pending.** No Gemini key or session endpoint is configured.
+
+## 2026-11-17 — Hosted health checkpoint verified
+
+The user copied the prepared handler into the dashboard editor, deployed it, and reports it is working correctly. Independent HTTPS requests to `https://esp32-companion-control.stiener.workers.dev` verified the current hosted behavior:
+
+| Request | Result |
+|---|---|
+| `GET /health` | PASS: 200, JSON content type, exact status/service/api_version payload |
+| `HEAD /health` | PASS: 200 with empty body |
+| `POST /health` | PASS: 405, `Allow: GET, HEAD`, method-not-allowed JSON |
+| `GET /` | PASS: 404 with not-found JSON |
+| `POST /device/session` | PASS: 404; session issuance is still unimplemented |
+| Cache control | PASS: all five responses use `Cache-Control: no-store` |
+
+Requests used normal certificate-validated HTTPS and carried no credentials or personal audio. Full public response evidence is saved in ignored `logs/worker-hosted-health-http.log`. Firmware was not changed. **Hosted health checkpoint passed.** Next baby step: create one device-authentication Worker secret and prove correct/missing/wrong credential behavior before adding Gemini. No Gemini key, device credential, authentication endpoint or request limiter has been created at this checkpoint.
