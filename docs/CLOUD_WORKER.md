@@ -80,4 +80,17 @@ Cloudflare currently lists Windows 11 as the supported Windows platform for Wran
 
 The permanent Gemini key belongs in the server secret workflow when we reach that step. It is not needed in chat, firmware or the health test.
 
+## Device credential: local value ready, hosted save pending
+
+A random 256-bit device credential has been generated in the Git-ignored `cloudflare-worker/.dev.vars` file. Its name is `DEVICE_AUTH_TOKEN`. The value was not printed in chat or logs. This is the robot's shared credential, separate from a Gemini API key or a Cloudflare account/deployment token.
+
+In the Worker's Settings, under **Runtime variables and secrets**, use **Add variable** with the Production tab selected:
+
+1. Set Type to **Secret**.
+2. Set Name to `DEVICE_AUTH_TOKEN`.
+3. Open the local `.dev.vars` file and copy only the 64 characters inside the quotes into Value.
+4. Save/deploy the change. Report only that the secret was saved; keep its value out of chat and screenshots.
+
+Cloudflare's hosted save is not yet confirmed. The current handler still implements health checks only. The next code increment will validate this credential and test correct, missing and incorrect credentials before adding Gemini. Preparing this secret does not flash the ESP32 or enable a Gemini session.
+
 Official references checked for this checkpoint: [Wrangler installation and requirements](https://developers.cloudflare.com/workers/wrangler/install-and-update/), [local development](https://developers.cloudflare.com/workers/local-development/), [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/), and [Miniflare testing](https://developers.cloudflare.com/workers/testing/miniflare/). Actual tests use the API shipped in the pinned packages. See [TEST_LOG.md](TEST_LOG.md) for the recorded results.

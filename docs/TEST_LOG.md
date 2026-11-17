@@ -202,3 +202,9 @@ The user copied the prepared handler into the dashboard editor, deployed it, and
 | Cache control | PASS: all five responses use `Cache-Control: no-store` |
 
 Requests used normal certificate-validated HTTPS and carried no credentials or personal audio. Full public response evidence is saved in ignored `logs/worker-hosted-health-http.log`. Firmware was not changed. **Hosted health checkpoint passed.** Next baby step: create one device-authentication Worker secret and prove correct/missing/wrong credential behavior before adding Gemini. No Gemini key, device credential, authentication endpoint or request limiter has been created at this checkpoint.
+
+## 2026-11-17 — Device credential prepared locally
+
+The user reached the Worker's Production runtime variables/secrets settings; the supplied screenshot shows no variables yet. Generated `DEVICE_AUTH_TOKEN` with Python `secrets.token_hex(32)` in `cloudflare-worker/.dev.vars`. The exclusive-create write preserved any existing file, and Git exclusion was verified before writing. The generated value is 64 lowercase hex characters (256 random bits) and was not printed or included in tracked files.
+
+Only the local credential exists at this checkpoint. Instructions supplied for adding it as a Production Worker **Secret** through Add variable. Hosted save is pending user confirmation. No remote request, firmware change, authentication handler, request limiter, or Gemini setup was performed in this increment. The deployed health handler remains the last verified service behavior.
