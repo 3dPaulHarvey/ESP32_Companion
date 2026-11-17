@@ -208,3 +208,25 @@ Requests used normal certificate-validated HTTPS and carried no credentials or p
 The user reached the Worker's Production runtime variables/secrets settings; the supplied screenshot shows no variables yet. Generated `DEVICE_AUTH_TOKEN` with Python `secrets.token_hex(32)` in `cloudflare-worker/.dev.vars`. The exclusive-create write preserved any existing file, and Git exclusion was verified before writing. The generated value is 64 lowercase hex characters (256 random bits) and was not printed or included in tracked files.
 
 Only the local credential exists at this checkpoint. Instructions supplied for adding it as a Production Worker **Secret** through Add variable. Hosted save is pending user confirmation. No remote request, firmware change, authentication handler, request limiter, or Gemini setup was performed in this increment. The deployed health handler remains the last verified service behavior.
+
+## 2026-11-17 — Phase 3b: local device authentication verified
+
+The first generated device token appeared in automatically attached IDE-selected text. Replaced its local value with fresh randomness without printing the replacement. The user then confirmed saving the new `DEVICE_AUTH_TOKEN` as a Production Secret. Hosted correctness/matching of that value still requires the authenticated test after code deployment.
+
+Added `POST /device/check` using the server secret and an Authorization Bearer header. Configured secrets must be 64 lowercase hex characters; missing/malformed configuration rejects access with 503. Missing/incorrect/malformed supplied credentials get the same 401 JSON/challenge. Valid fixed-length credentials use Cloudflare `crypto.subtle.timingSafeEqual` and return only `{"authenticated":true}`. Credentials in a query or body are ignored. `/health` remains public, and `/device/session` remains 404.
+
+| Check | Result |
+|---|---|
+| Runtime suite | PASS: nine groups in local workerd, retaining all four health-route groups plus correct/invalid/query-body/configuration/method auth groups |
+| Auth rejection cases | PASS: missing, wrong first/last character, short/long, wrong scheme, duplicate-style header, case-changed value and invalid text all return 401 |
+| Configuration failure | PASS: absent secret or a value including surrounding quotes returns 503; health remains 200 |
+| Packaging | PASS: Wrangler dry run, 2.07 KiB / gzip 0.88 KiB; no publishing performed |
+| Real local HTTP | PASS: Wrangler loaded `.dev.vars` with its value hidden; desktop checker observed missing=401, wrong=401, correct=200 |
+| Desktop client | Python compilation passes; an isolated fixture test verified rejection of unsafe target forms and refusal of redirects, using no real credential |
+| Credential output | Token not printed in runtime logs, test results or desktop checker output; local secret file remains Git-ignored |
+| Cleanup | Local development server shut down with `x` |
+| Hosted verification | Pending user deployment of the new handler; only hosted health was previously verified |
+
+`tools/check_device_auth.py` reads the ignored credential, validates the target origin (HTTPS except loopback HTTP), rejects redirects and emits only controlled status metadata. It verifies exact JSON/header contracts without printing arbitrary response bodies. Logs: `logs/worker-auth-runtime-tests.log`, `worker-auth-bundle.log`, `worker-auth-local-http.log`, and the latest `worker-device-auth-check.log`.
+
+**Local authentication checkpoint passed; hosted pass not yet claimed.** No Gemini request, request limiter, device provisioning or firmware change is included. Manual deployment and verification instructions are in [DEVICE_AUTH.md](DEVICE_AUTH.md).

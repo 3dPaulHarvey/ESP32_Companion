@@ -30,4 +30,6 @@ To build or flash local diagnostics, add `-Profile diagnostics` to the wrapper c
 
 **Phase 3a health endpoint is verified locally and online:** runtime tests, packaging and hosted HTTPS success/error checks pass. [Run the Worker and view the next steps](docs/CLOUD_WORKER.md). Device authentication and Gemini remain subsequent checkpoints. [Beginner architecture overview](docs/CLOUD_OVERVIEW.md). The baseline retains the original network, activation, and protocol behavior.
 
+**Phase 3b authentication is ready locally:** correct, missing and incorrect device credentials behave as expected. The user has saved the Production secret; deployment of the updated handler and hosted authentication verification are pending. [Device authentication procedure](docs/DEVICE_AUTH.md).
+
 Based on [TechTalkies/Xiaozhi-for-XiaoESP32S3](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3), preserving the supplied licenses and attribution.

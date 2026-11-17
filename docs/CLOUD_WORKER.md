@@ -44,7 +44,7 @@ This local stage needs no Cloudflare login or Gemini API key. The development se
 ```
 
 - `install` uses `npm ci` and the saved package lock to install the pinned development dependencies. This needs internet access when packages are not cached.
-- `test` runs four groups of HTTP contract checks inside Cloudflare's local `workerd` runtime through Miniflare.
+- `test` runs health and device-authentication HTTP contract checks inside Cloudflare's local `workerd` runtime through Miniflare.
 - `check` builds the Worker using `wrangler deploy --dry-run`. This prepares a local bundle without publishing it.
 
 | Request | Expected result |
@@ -54,7 +54,7 @@ This local stage needs no Cloudflare login or Gemini API key. The development se
 | Other methods on `/health` | `405`, `Allow: GET, HEAD` |
 | Other routes, including `/device/session` | `404` |
 
-The handler makes no Gemini or other outbound service requests. It contains no credentials. The service has no authentication/session endpoint yet.
+The handler makes no Gemini or other outbound service requests. It contains no embedded credentials. The hosted health-only version is verified; a local device-authentication check is now prepared and tested. See [DEVICE_AUTH.md](DEVICE_AUTH.md) to publish and verify that next increment. Gemini session issuance remains unimplemented.
 
 ## Tooling and files
 
@@ -63,7 +63,7 @@ The separate `cloudflare-worker/` project contains:
 - `src/index.js`: request handler.
 - `wrangler.jsonc`: Worker name, entry point, compatibility date and local server configuration.
 - `package.json` / `package-lock.json`: pinned development tools and commands.
-- `test/health.test.js`: runtime checks for health, HEAD, unsupported methods and missing routes.
+- `test/health.test.js`: runtime checks for health, allowed methods, missing routes and device authentication.
 
 `tools/worker.ps1` locates Node.js, selects this project and runs its commands. This PC has a project-local Node.js v24.22.3 distribution under ignored `.tools/`, downloaded from Node.js and verified against its published SHA256. Its download manifest is saved there. On another PC, install an active Node.js LTS release with npm (at least Node 22.12), reopen PowerShell and run the install command above.
 
@@ -80,9 +80,9 @@ Cloudflare currently lists Windows 11 as the supported Windows platform for Wran
 
 The permanent Gemini key belongs in the server secret workflow when we reach that step. It is not needed in chat, firmware or the health test.
 
-## Device credential: local value ready, hosted save pending
+## Device credential: hosted save confirmed, authentication deployment pending
 
-A random 256-bit device credential has been generated in the Git-ignored `cloudflare-worker/.dev.vars` file. Its name is `DEVICE_AUTH_TOKEN`. The value was not printed in chat or logs. This is the robot's shared credential, separate from a Gemini API key or a Cloudflare account/deployment token.
+A random 256-bit device credential has been generated in the Git-ignored `cloudflare-worker/.dev.vars` file. Its name is `DEVICE_AUTH_TOKEN`. The first value was exposed by an IDE text selection and was replaced locally without printing its replacement. The user has now confirmed saving the replacement as a Production Secret. This is the robot's shared credential, separate from a Gemini API key or a Cloudflare account/deployment token.
 
 In the Worker's Settings, under **Runtime variables and secrets**, use **Add variable** with the Production tab selected:
 
@@ -91,6 +91,6 @@ In the Worker's Settings, under **Runtime variables and secrets**, use **Add var
 3. Open the local `.dev.vars` file and copy only the 64 characters inside the quotes into Value.
 4. Save/deploy the change. Report only that the secret was saved; keep its value out of chat and screenshots.
 
-Cloudflare's hosted save is not yet confirmed. The current handler still implements health checks only. The next code increment will validate this credential and test correct, missing and incorrect credentials before adding Gemini. Preparing this secret does not flash the ESP32 or enable a Gemini session.
+The local authentication handler and checker now pass correct/missing/wrong credential tests. Its hosted deployment is the next manual step; see [DEVICE_AUTH.md](DEVICE_AUTH.md). Saving the secret alone does not enforce authentication in the older health-only handler. No ESP32 flash or Gemini session is involved in this increment.
 
 Official references checked for this checkpoint: [Wrangler installation and requirements](https://developers.cloudflare.com/workers/wrangler/install-and-update/), [local development](https://developers.cloudflare.com/workers/local-development/), [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/), and [Miniflare testing](https://developers.cloudflare.com/workers/testing/miniflare/). Actual tests use the API shipped in the pinned packages. See [TEST_LOG.md](TEST_LOG.md) for the recorded results.
