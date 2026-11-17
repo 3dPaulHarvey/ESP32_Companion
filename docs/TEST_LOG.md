@@ -159,3 +159,25 @@ Initial Phase 2b artifacts remain in `recovery/2026-11-09-COM26/phase-2b-local-c
 The user reports: “the recent irl test is working well” and requests proceeding with development. Record the corrected listening/status/cue/idle interaction as a user-confirmed physical pass. This supersedes the physical-retest deferral above; no fresh serial log, exact cycle count, acoustic measurement or new firmware flash accompanies this report.
 
 The existing automated capture/cancellation results and three voice-triggered sample-count results remain the measured evidence. Microphone headroom calibration, the capture-under-network-interruption check and the full repeated-capture exit sequence remain open. Proceed with the independent local Worker health-endpoint preparation; this does not establish a Gemini connection or close those hardware checks.
+
+## 2026-11-17 — Phase 3a: local Worker health endpoint
+
+Created a separate `cloudflare-worker/` project with an ES module request handler, Wrangler configuration, pinned development dependencies/lockfile and local runtime tests. This starts cloud-service development independently of the remaining microphone quality work. Firmware source and device flash were not changed in this checkpoint.
+
+| Check | Observed result |
+|---|---|
+| Node setup | Node v24.22.3 / npm 11.19.1 prepared under ignored `.tools/`; official Node download SHA256 verified and recorded in `.tools/node-download-manifest.json` |
+| Pinned tools | Wrangler 4.164.0, matching Miniflare 5.20261117.0-beta, workerd 1.20261117.1; `npm ci` succeeds with the saved lockfile |
+| Runtime tests | PASS: four groups in real local workerd — GET/JSON/cache headers, HEAD with no body, four disallowed methods with 405/Allow, eight unknown path/method combinations with 404 |
+| Packaging | PASS: Wrangler `deploy --dry-run`, no bindings, bundle approximately 0.81 KiB / gzip 0.43 KiB; no deployment performed |
+| Actual development server | PASS: `wrangler dev --local` started on `127.0.0.1:8787`; TCP listener confirmed on loopback |
+| HTTP probe | PASS: GET `/health` 200 and expected JSON, HEAD 200/empty, POST `/health` 405/Allow, GET `/device/session` 404; no-store headers verified |
+| Process cleanup | PASS: exited the Wrangler menu with `x`; development server shut down |
+| Platform | Windows 10 Pro 10.0.19045. Pinned checks pass here, although current Cloudflare docs support Windows 11 rather than Windows 10 |
+| Scope | No Cloudflare account login, remote resource creation, provider secrets, session endpoint, Gemini requests or ESP32 cloud integration |
+
+The first test attempt found that the installed Miniflare 5 API has a different constructor shape from the generic online example; tests now use its shipped worker/config/manifest API. The PowerShell wrapper also preserves native exit codes while allowing warnings on stderr. Both runtime tests and the dry run passed after those corrections. These were development-tool issues, not robot failures.
+
+Logs: `logs/worker-health-install.log`, `worker-health-tests.log`, `worker-health-bundle.log`, `worker-health-http.log`. The automatic tests dispose their runtime; the development server is stopped after the manual HTTP probe. No Gemini key is needed for the current code. Existing user editor settings remain untouched and unstaged.
+
+**Local health checkpoint passed.** Next: account setup and hosted HTTPS health verification, then device authentication/request limits and Gemini token support. The endpoint reports that this Worker is alive; it does not report end-to-end robot or Gemini readiness. Commands and platform notes are in [CLOUD_WORKER.md](CLOUD_WORKER.md).

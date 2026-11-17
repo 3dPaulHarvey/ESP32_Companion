@@ -1,6 +1,6 @@
 # Cloudflare and Gemini: the next stage
 
-No account, API key or deployment is needed for the current local microphone test.
+The local hardware interaction has a successful physical follow-up, and the first Worker health endpoint is now verified on this PC. [Run the local Worker and see the next checkpoint](CLOUD_WORKER.md). No account or API key is needed to repeat that local health check.
 
 A **Cloudflare Worker** is a small program hosted by Cloudflare that responds to requests. We will use it as the robot's authentication/session endpoint; there is no virtual server for you to maintain. [Cloudflare Workers overview](https://developers.cloudflare.com/workers/)
 
@@ -19,10 +19,11 @@ Google documents the backend-token/client-WebSocket pattern for Gemini Live. Tem
 
 We will verify the cloud stage in small steps:
 
-1. Create a Worker with a simple health response and test it locally.
-2. Add device authentication and verify that invalid requests are rejected.
-3. Store the Gemini key as a Worker secret and test temporary-token issuance.
-4. Prove a desktop Gemini connection and voice response before adding embedded transport.
-5. Connect the ESP32 only after those checks pass.
+1. **Done locally:** create a Worker with a simple health response and test its success/error routes.
+2. Sign into Cloudflare, publish the health-only service and verify its HTTPS response.
+3. Add device authentication and verify that invalid requests are rejected.
+4. Store the Gemini key as a Worker secret and test temporary-token issuance.
+5. Prove a desktop Gemini connection and voice response before adding embedded transport.
+6. Connect the ESP32 only after those checks pass.
 
 We will check current free-tier eligibility/limits and model availability at that stage; owning an API key does not by itself establish quota or cost. The Worker handles small control requests; the intended voice stream runs directly between the ESP32 and Gemini.
