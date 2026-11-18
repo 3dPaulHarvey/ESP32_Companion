@@ -4,6 +4,7 @@
   "main": "src/index.js",
   "compatibility_date": "2026-11-17",
   "send_metrics": false,
+  "preview_urls": false,
   "secrets": {
     "required": ["DEVICE_AUTH_TOKEN"]
   },

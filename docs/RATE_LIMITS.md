@@ -17,7 +17,7 @@ Cloudflare documents these limits as approximate and local to each location, wit
 
 ## Configuration
 
-`cloudflare-worker/wrangler.jsonc` declares `DEVICE_RATE_LIMITER`, namespace `20261117`, and `simple: {"limit":10,"period":60}`. Reserve that namespace for this project in this account; sharing namespace and key shares counters. The configuration also requires the existing `DEVICE_AUTH_TOKEN` secret and retains enabled Worker observability shown in the dashboard.
+`cloudflare-worker/wrangler.jsonc` declares `DEVICE_RATE_LIMITER`, namespace `20261117`, and `simple: {"limit":10,"period":60}`. Reserve that namespace for this project in this account; sharing namespace and key shares counters. The configuration also requires the existing `DEVICE_AUTH_TOKEN` secret and retains enabled Worker observability and disabled preview URLs shown by the remote configuration.
 
 Rate-limiting bindings are not currently visible in the Cloudflare dashboard. Deploy this configuration with Wrangler together with the code. Pasting the new code alone into the editor would omit its required limiter binding and cause authenticated requests to return 503. [Cloudflare configuration and dashboard limitation](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)
 
