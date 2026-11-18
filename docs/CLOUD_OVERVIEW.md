@@ -24,7 +24,7 @@ We will verify the cloud stage in small steps:
 3. **Done hosted:** device authentication rejects missing/wrong credentials and accepts the correct one.
 4. **Done hosted:** the shared device limit rejects excess requests and recovers after its retry window.
 5. **Done hosted:** store the Gemini key as a Worker Secret and verify temporary-token issuance.
-6. **Connection done:** Gemini accepts the desktop WebSocket setup. Next verify one spoken response, then a short audio-input exchange.
+6. **Connection and first reply done:** Gemini accepts the desktop setup, and the user confirms a clear spoken reply through the PC speakers. Next verify a short prerecorded audio-input exchange. [Desktop voice results](DESKTOP_VOICE.md).
 7. Connect the ESP32 only after those checks pass.
 
 Google currently lists free-tier Gemini 3.8 Live input/output, and the user reports a Free-tier project. The successful session check proves access at this checkpoint, not remaining quota. Review the project usage view before longer tests. The Worker handles small control requests; the intended voice stream runs directly between the ESP32 and Gemini. [Session results and limitations](GEMINI_SESSIONS.md).

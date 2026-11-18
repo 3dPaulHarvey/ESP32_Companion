@@ -339,3 +339,23 @@ Local iterations caught a rejection of empty HTTP POST streams and an unsupporte
 Evidence: `logs/worker-gemini-runtime-tests.log`, `worker-gemini-bundle.log`, `worker-gemini-session-check.log`, `worker-gemini-hosted-auth-regression.log`, `worker-gemini-local-http.log` and sanitized `worker-gemini-deployment.json`. The rate-checker's expected serving revision now follows `gemini-session-v1`; its auth-only burst still makes no Gemini calls. Final metadata confirms both credential bindings remain `secret_text`.
 
 **Phase 3d token/connection checkpoint passed.** This establishes desktop-to-Worker-to-Gemini session access. Spoken output, audio input, microphone headroom and ESP32 cloud transport remain later checks. Robot firmware, COM26 flash, the original COM24 board and the reference repository were not changed. See [GEMINI_SESSIONS.md](GEMINI_SESSIONS.md).
+
+## 2026-11-17 - First desktop spoken reply verified
+
+After saving Phase 3d at `8796881` / `phase-3d-hosted-gemini-session-verified`, extended the desktop checker with `--speak` and the wrapper's `voice-check` action. The Worker and hosted deployment are unchanged. After a temporary-token setup acknowledgment, the client sends one fixed text greeting request, collects the model's audio until `turnComplete`, and closes. It opens no microphone and sends no personal audio. Response handling serializes async Blob decoding to preserve PCM chunk order, rejects unexpected formats/tools/interruption, caps PCM at 20 seconds and the complete turn at 30 seconds, and writes a standard WAV under ignored logs.
+
+| Check | Observed result |
+|---|---|
+| Real token/setup | PASS: method/auth/issuance checks and constrained WebSocket setup |
+| Real spoken response | PASS: nonempty completed PCM turn received from the fixed text request |
+| Independent WAV validation | PASS: Python wave reader, 24,000 Hz / mono / 16-bit PCM, 65,760 frames, 2.74 seconds |
+| Sample levels | Peak magnitude 25,382; RMS 4,694.11; zero clipped samples |
+| Windows playback | PASS: SoundPlayer Load/PlaySync completed successfully |
+| User verification | PASS: user reports clear speech at normal speed |
+| Setup-only regression | PASS: original session-check command still receives setupComplete and closes without sending a question/audio |
+| Tooling | Node syntax, PowerShell parsing and whitespace checks pass |
+| Secrets | Permanent key stays in the Production Secret; temporary credential remains in memory and is absent from WAV/metadata output |
+
+Evidence: `logs/worker-gemini-voice-check.log`, `worker-gemini-voice-check.wav`, `worker-gemini-voice-wave-validation.log`, `worker-gemini-voice-listener-check.log` and the latest `worker-gemini-session-check.log`. All 20 existing Worker runtime groups passed in Phase 3d; no Worker source/config changed in this output increment. No additional runtime dependencies or cloud deployment were required.
+
+**First desktop spoken-output checkpoint passed, including listener confirmation.** This is not yet an audio-input or robot conversation test. Next verify a fixed prerecorded 16 kHz question / 24 kHz response, then integrate ESP32 transport and microphone headroom. See [DESKTOP_VOICE.md](DESKTOP_VOICE.md).

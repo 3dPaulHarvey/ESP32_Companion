@@ -36,4 +36,6 @@ To build or flash local diagnostics, add `-Profile diagnostics` to the wrapper c
 
 **Phase 3d Gemini session access is verified online:** the permanent key is a Production Worker Secret, authenticated temporary-token issuance passes, and Gemini 3.8 Live accepts the desktop constrained-WebSocket setup. All 20 local runtime test groups pass. No prompt or microphone audio was sent. Spoken replies and ESP32 transport are the next checkpoints. [Key setup, session contract and repeatable check](docs/GEMINI_SESSIONS.md).
 
+**First desktop spoken reply is verified:** Gemini returned 2.74 seconds of valid 24 kHz mono PCM without clipped samples. Windows playback completed, and the user confirmed clear speech at normal speed. The test sent a fixed text greeting request and used no microphone. Audio input and ESP32 transport are next. [Replay and results](docs/DESKTOP_VOICE.md).
+
 Based on [TechTalkies/Xiaozhi-for-XiaoESP32S3](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3), preserving the supplied licenses and attribution.
