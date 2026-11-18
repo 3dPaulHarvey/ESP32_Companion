@@ -63,7 +63,7 @@ Stop the development server with **x** when finished. The local tests use a publ
 
 `POST /device/check` expects `Authorization: Bearer <DEVICE_AUTH_TOKEN>`. The token must match the generated 64-character value exactly; the Bearer scheme is case-insensitive. Tokens in the URL or body are not accepted. The Worker validates its configured secret before comparing fixed-length bytes with Cloudflare's timing-resistant comparison. Missing/malformed configuration rejects access with 503.
 
-This is one shared credential for one development device. It is not a Cloudflare account API token, a Gemini API key, or a Gemini temporary session token. Session issuance and request limiting are still later work; add limits before enabling provider calls. Device-side storage and transport remain separate firmware work. No complete Phase 3 exit gate or robot conversation is claimed here.
+This is one shared credential for one development device. It is not a Cloudflare account API token, a Gemini API key, or a Gemini temporary session token. Session issuance and device-side transport remain later work. A request limiter is now prepared locally; deploy its binding and code together using [RATE_LIMITS.md](RATE_LIMITS.md), rather than pasting only the updated source. No complete Phase 3 exit gate or robot conversation is claimed here.
 
 The first locally generated credential was rotated after IDE-selected text exposed it in chat, before the user confirmed saving the replacement. Its value is absent from tracked source/docs/logs. Keep the private file closed when sending IDE context.
 

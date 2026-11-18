@@ -7,13 +7,17 @@ const config = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.met
 const source = await readFile(new URL(`../${config.main}`, import.meta.url), "utf8");
 // Public test fixture, not the credential from .dev.vars.
 const testToken = "0123456789abcdef".repeat(4);
-function makeWorker(env = {}) {
+const rateConfig = config.ratelimits.find(binding => binding.name === "DEVICE_RATE_LIMITER");
+function makeWorker(env = {}, withRateLimit = true, namespace = rateConfig.namespace_id) {
+  const rateEnv = withRateLimit ? {
+    DEVICE_RATE_LIMITER: { type: "rate-limit", namespace, simple: rateConfig.simple },
+  } : {};
   return new Miniflare({
     workers: [{
       config: {
         name: config.name,
         compatibilityDate: config.compatibility_date,
-        env,
+        env: { ...rateEnv, ...env },
         manifest: {
           mainModule: "index.js",
           modules: { "index.js": { type: "esm", contents: source } },
@@ -28,7 +32,18 @@ function makeWorker(env = {}) {
 const worker = makeWorker({ DEVICE_AUTH_TOKEN: { type: "json", value: testToken } });
 const unconfiguredWorker = makeWorker();
 const malformedConfigWorker = makeWorker({ DEVICE_AUTH_TOKEN: { type: "json", value: `"${testToken}"` } });
-after(() => Promise.all([worker, unconfiguredWorker, malformedConfigWorker].map(instance => instance.dispose())));
+const noLimiterWorker = makeWorker({ DEVICE_AUTH_TOKEN: { type: "json", value: testToken } }, false);
+const invalidLimiterWorker = makeWorker({
+  DEVICE_AUTH_TOKEN: { type: "json", value: testToken },
+  DEVICE_RATE_LIMITER: { type: "json", value: "invalid" },
+});
+const limitedWorker = makeWorker(
+  { DEVICE_AUTH_TOKEN: { type: "json", value: testToken } }, true,
+  String(Number(rateConfig.namespace_id) + 1),
+);
+after(() => Promise.all([
+  worker, unconfiguredWorker, malformedConfigWorker, noLimiterWorker, invalidLimiterWorker, limitedWorker,
+].map(instance => instance.dispose())));
 
 test("GET /health returns service status as noncached JSON in workerd", async () => {
   const response = await worker.dispatchFetch("http://localhost/health");
@@ -140,4 +155,55 @@ test("the device check requires POST and advertises that method", async () => {
     if (method === "HEAD") assert.equal(await response.text(), "");
     else assert.deepEqual(await response.json(), { error: "method_not_allowed" });
   }
+});
+
+test("a missing or invalid limiter fails closed after authentication while health stays public", async () => {
+  for (const instance of [noLimiterWorker, invalidLimiterWorker]) {
+    const response = await instance.dispatchFetch("http://localhost/device/check", {
+      method: "POST", headers: { Authorization: `Bearer ${testToken}` },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await response.json(), { error: "service_unavailable" });
+    const unauthorized = await instance.dispatchFetch("http://localhost/device/check", { method: "POST" });
+    assert.equal(unauthorized.status, 401);
+    await unauthorized.arrayBuffer();
+    const healthy = await instance.dispatchFetch("http://localhost/health");
+    assert.equal(healthy.status, 200);
+    await healthy.arrayBuffer();
+  }
+});
+
+test("device quota ignores bad credentials, enforces 429, and leaves health available", async () => {
+  assert.equal(rateConfig.simple.limit, 10);
+  assert.equal(rateConfig.simple.period, 60);
+  for (let i = 0; i < rateConfig.simple.limit + 2; ++i) {
+    const response = await limitedWorker.dispatchFetch("http://localhost/device/check", {
+      method: "POST", headers: { Authorization: `Bearer f${testToken.slice(1)}` },
+    });
+    assert.equal(response.status, 401);
+    await response.arrayBuffer();
+  }
+  for (let i = 0; i < rateConfig.simple.limit; ++i) {
+    const response = await limitedWorker.dispatchFetch(`http://localhost/device/check?attempt=${i}`, {
+      method: "POST", headers: { Authorization: `Bearer ${testToken}` },
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { authenticated: true });
+  }
+  for (let i = 0; i < 2; ++i) {
+    const response = await limitedWorker.dispatchFetch(`http://localhost/device/check?different=${i}`, {
+      method: "POST", headers: { Authorization: `Bearer ${testToken}` },
+    });
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get("retry-after"), "60");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await response.json(), { error: "rate_limited" });
+  }
+  const unauthorized = await limitedWorker.dispatchFetch("http://localhost/device/check", { method: "POST" });
+  assert.equal(unauthorized.status, 401);
+  await unauthorized.arrayBuffer();
+  const healthy = await limitedWorker.dispatchFetch("http://localhost/health");
+  assert.equal(healthy.status, 200);
+  await healthy.arrayBuffer();
 });

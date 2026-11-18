@@ -256,3 +256,25 @@ The initial mismatch was resolved by synchronizing the secret; no token regenera
 One auxiliary health probe using the default Python user agent received HTTP 403. A follow-up using the usual explicit Companion client identifier returned the expected 200 response. No Worker or security settings were changed; the cause of that single 403 was not independently established. The three authentication requests all used the existing Companion checker and passed.
 
 **Hosted authentication checkpoint passed.** This verifies the desktop-to-Worker credential path, not ESP32 transport or Gemini conversation. Next incremental work: request limits before provider calls, then supported Gemini model/quota/token verification. Firmware remains at its earlier local diagnostic checkpoint, and microphone headroom calibration remains open before streaming.
+
+## 2026-11-17 — Phase 3c: local request limit and recovery verified
+
+Added `DEVICE_RATE_LIMITER` with a threshold of 10 authenticated control requests/60 seconds, namespace `20261117`. Authentication happens first; a fixed nonsecret key represents the one development device. Throttling returns 429/rate-limited JSON with Retry-After 60 and no-store. Missing/invalid limiter configuration and limiter errors reject authenticated requests with 503. Health and invalid-credential responses remain independent of the device quota. No provider call or firmware change is included.
+
+| Check | Result |
+|---|---|
+| Runtime suite | PASS: 11 groups, retaining all health/auth tests plus missing/invalid limiter and quota behavior |
+| Runtime quota | PASS: wrong credentials do not spend quota; 10 admitted requests then 429; varying query does not reset allowance; health remains 200 and unauthenticated requests remain 401 |
+| Packaging | PASS: 3.08 KiB / gzip 1.12 KiB; dry run lists DEVICE_RATE_LIMITER at 10 requests/60s |
+| Real local burst | PASS: 10 authenticated requests admitted, next request 429 with Retry-After 60; health and wrong/missing auth checks passed during throttling |
+| Recovery | PASS: authenticated request returns 200 after a 61-second retry wait |
+| Post-recovery auth regression | PASS: missing=401, wrong=401, correct=200 using the real local credential |
+| Tooling | Python byte compilation, PowerShell syntax and whitespace checks pass; wrapper adds login/whoami/deploy commands and checks the deployment target name |
+| Cleanup | Local development server shut down with x after HTTP checks |
+| Hosted state | Last verified live version remains Phase 3b; limiter is not deployed yet |
+
+Logs: `logs/worker-rate-runtime-tests.log`, `worker-rate-bundle.log`, `worker-rate-local-verified.log`, `worker-rate-auth-regression.log`, and latest `worker-rate-limit-check.log`. Secret values remain absent from emitted results. Required-secret names (not values) are declared in configuration; observability remains enabled to match the supplied dashboard state.
+
+Cloudflare's current docs say rate-limit bindings are not visible in the dashboard, so this increment needs Wrangler configuration deployment. CLI account status was checked privately and is not authenticated. A reduced-scope OAuth login is prepared (`account:read`, `user:read`, `workers_scripts:write`) with OS-keyring storage requested. Authorization and hosted deployment have not yet occurred. See [RATE_LIMITS.md](RATE_LIMITS.md).
+
+**Local request-limit checkpoint passed; hosted checkpoint pending.** Cloudflare enforcement is approximate per location and cannot guarantee a strict worldwide quota or billing cap. Provider quota checks remain required before Gemini calls. No paid plan change or new Gemini access has been configured.

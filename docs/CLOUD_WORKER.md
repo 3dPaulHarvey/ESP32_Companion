@@ -75,7 +75,7 @@ Cloudflare currently lists Windows 11 as the supported Windows platform for Wran
 
 1. **Complete:** publish the health-only Worker and verify its HTTPS URL.
 2. **Complete:** store the device credential as a Production Secret and verify missing/wrong rejection plus correct-credential success over HTTPS.
-3. Add request limits before enabling provider calls.
+3. Request limits now pass local burst/recovery tests; authorize Wrangler and deploy the binding plus code together. See [RATE_LIMITS.md](RATE_LIMITS.md).
 4. Verify Gemini Live's current model/token support and quota, then store the permanent key as a Worker secret and test token issuance.
 5. Prove a desktop Gemini connection before joining it to the ESP32. Finish microphone headroom calibration before voice streaming.
 

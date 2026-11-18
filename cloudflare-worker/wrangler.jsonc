@@ -4,6 +4,22 @@
   "main": "src/index.js",
   "compatibility_date": "2026-11-17",
   "send_metrics": false,
+  "secrets": {
+    "required": ["DEVICE_AUTH_TOKEN"]
+  },
+  "observability": {
+    "enabled": true
+  },
+  "ratelimits": [
+    {
+      "name": "DEVICE_RATE_LIMITER",
+      "namespace_id": "20261117",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    }
+  ],
   "dev": {
     "ip": "127.0.0.1",
     "port": 8787,

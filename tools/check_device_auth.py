@@ -85,8 +85,9 @@ def check(base, token):
         if status != expected_status or body != expected_body or not valid_headers:
             hint = {
                 404: "Deploy the updated authentication handler first.",
-                503: "Check the Production DEVICE_AUTH_TOKEN secret name and format.",
+                503: "Check the Production device secret and DEVICE_RATE_LIMITER binding.",
                 401: "Check that the saved Production secret matches the current local token.",
+                429: "Device request limit reached; wait at least 60 seconds before retrying.",
             }.get(status, "Check the deployed handler and authentication configuration.")
             raise RuntimeError(f"{label}: expected HTTP {expected_status} and its JSON contract; got HTTP {status}. {hint}")
         results.append({"case": label, "status": status, "passed": True})

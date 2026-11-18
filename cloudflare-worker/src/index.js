@@ -5,6 +5,9 @@ const health = {
 };
 
 const encoder = new TextEncoder();
+const retryAfterSeconds = 60;
+// One authenticated development device. Never use its secret as a counter key.
+const deviceRateKey = "esp32-companion-control:development-device:v1";
 
 function authenticateDevice(request, env, headers) {
   const expected = env?.DEVICE_AUTH_TOKEN;
@@ -26,8 +29,31 @@ function authenticateDevice(request, env, headers) {
   return null;
 }
 
+async function enforceDeviceRateLimit(env, headers) {
+  const limiter = env?.DEVICE_RATE_LIMITER;
+  if (!limiter || typeof limiter.limit !== "function") {
+    return Response.json({ error: "service_unavailable" }, { status: 503, headers });
+  }
+  try {
+    const result = await limiter.limit({ key: deviceRateKey });
+    if (typeof result?.success !== "boolean") {
+      return Response.json({ error: "service_unavailable" }, { status: 503, headers });
+    }
+    if (!result.success) {
+      return Response.json({ error: "rate_limited" }, {
+        status: 429,
+        headers: { ...headers, "Retry-After": String(retryAfterSeconds) },
+      });
+    }
+  } catch {
+    // A limiter outage must not allow unbounded provider calls later.
+    return Response.json({ error: "service_unavailable" }, { status: 503, headers });
+  }
+  return null;
+}
+
 export default {
-  fetch(request, env) {
+  async fetch(request, env) {
     const { pathname } = new URL(request.url);
     const headers = { "Cache-Control": "no-store" };
 
@@ -40,6 +66,8 @@ export default {
       }
       const rejection = authenticateDevice(request, env, headers);
       if (rejection) return rejection;
+      const throttled = await enforceDeviceRateLimit(env, headers);
+      if (throttled) return throttled;
       return Response.json({ authenticated: true }, { headers });
     }
 

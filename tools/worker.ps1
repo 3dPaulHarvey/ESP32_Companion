@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('install', 'test', 'check', 'dev')]
+    [ValidateSet('install', 'test', 'check', 'dev', 'login', 'whoami', 'deploy')]
     [string]$Action = 'test'
 )
 
@@ -27,6 +27,12 @@ if (-not (Test-Path -LiteralPath $npmCli)) {
 }
 if ($Action -ne 'install' -and -not (Test-Path -LiteralPath (Join-Path $workerRoot 'node_modules\wrangler\package.json'))) {
     throw 'Install the pinned Worker dependencies first: .\tools\worker.ps1 -Action install'
+}
+if ($Action -eq 'deploy') {
+    $deployConfig = Get-Content -LiteralPath (Join-Path $workerRoot 'wrangler.jsonc') -Raw | ConvertFrom-Json
+    if ($deployConfig.name -ne 'esp32-companion-control') {
+        throw 'Deployment is restricted to this project''s esp32-companion-control Worker.'
+    }
 }
 
 $previousPath = $env:PATH

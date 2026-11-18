@@ -32,4 +32,6 @@ To build or flash local diagnostics, add `-Profile diagnostics` to the wrapper c
 
 **Phase 3b device authentication is verified locally and online:** missing/wrong credentials are rejected and the current local credential succeeds after synchronizing the Production Secret. [Device authentication procedure](docs/DEVICE_AUTH.md). Request limiting, Gemini session issuance and ESP32 cloud transport remain later steps.
 
+**Phase 3c request limits pass locally:** a 10-request/minute device threshold produces 429/retry responses and recovers after the retry window. The built-in binding and code must be deployed together with Wrangler; account authorization and hosted verification are pending. [Rate-limit deployment and checks](docs/RATE_LIMITS.md).
+
 Based on [TechTalkies/Xiaozhi-for-XiaoESP32S3](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3), preserving the supplied licenses and attribution.
