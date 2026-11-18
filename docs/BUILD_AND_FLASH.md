@@ -2,7 +2,9 @@
 
 Use the development unit on **COM26**. Leave the original working robot separate.
 
-For cloud-independent subsystem checks, use the separate [local diagnostics profile](DIAGNOSTICS.md). It is currently the test firmware on COM26; normal baseline commands below restore the original application behavior with English wake.
+COM26 currently runs the [manual session-check profile](ESP32_SESSIONS.md), which retains the local wake/listen/cue sequence and Wi-Fi-off startup. Use the separate [local diagnostics profile](DIAGNOSTICS.md) for checks without the session module. Normal baseline commands below restore the original application behavior with English wake.
+
+Build/flash the current control-only increment with `-Profile session`. Its wrapper verifies the development MAC on COM26 before flashing, and it uses separate `build-session/` and generated configuration files. The original backups and `build-diagnostics/` remain available. The session profile's NVS credential survives normal application flashing; a full pre-session flash restore returns NVS to that backup's earlier state.
 
 ## Pinned setup
 

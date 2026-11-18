@@ -10,6 +10,15 @@ config COMPANION_HARDWARE_DIAGNOSTICS
         application/cloud startup. Wi-Fi remains off until explicitly requested
         from the USB serial diagnostic menu. No cloud audio protocol is started.
 
+config COMPANION_SESSION_PROBE
+    bool "Companion manual authenticated session check"
+    depends on COMPANION_HARDWARE_DIAGNOSTICS
+    default n
+    help
+        Add a manual USB serial session check to local diagnostics. The device
+        credential is provisioned privately over USB into NVS. Wi-Fi stays off
+        at boot and wake words remain local. No voice or audio is uploaded.
+
 config OTA_URL
     string "Default OTA URL"
     default "https://api.tenclass.net/xiaozhi/ota/"

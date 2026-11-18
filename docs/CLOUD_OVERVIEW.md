@@ -25,6 +25,7 @@ We will verify the cloud stage in small steps:
 4. **Done hosted:** the shared device limit rejects excess requests and recovers after its retry window.
 5. **Done hosted:** store the Gemini key as a Worker Secret and verify temporary-token issuance.
 6. **Desktop audio exchange done:** Gemini accepts the desktop setup, and the user confirms both the first spoken reply and a correct answer to a prerecorded 16 kHz question. [Audio exchange results](DESKTOP_AUDIO.md).
-7. Next prove authenticated Worker/session access on the ESP32, then add live audio transport and finish microphone checks.
+7. **ESP32 session request done:** COM26 authenticates with the Worker and validates a temporary session response; local behavior and reboot persistence pass. [ESP32 session results](ESP32_SESSIONS.md).
+8. Next add the ESP32's direct Gemini WebSocket, then bounded audio transport and microphone checks.
 
 Google currently lists free-tier Gemini 3.8 Live input/output, and the user reports a Free-tier project. The successful session check proves access at this checkpoint, not remaining quota. Review the project usage view before longer tests. The Worker handles small control requests; the intended voice stream runs directly between the ESP32 and Gemini. [Session results and limitations](GEMINI_SESSIONS.md).

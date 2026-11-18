@@ -38,6 +38,8 @@ To build or flash local diagnostics, add `-Profile diagnostics` to the wrapper c
 
 **First desktop spoken reply is verified:** Gemini returned 2.74 seconds of valid 24 kHz mono PCM without clipped samples. Windows playback completed, and the user confirmed clear speech at normal speed. The test sent a fixed text greeting request and used no microphone. [Replay and results](docs/DESKTOP_VOICE.md).
 
-**Phase 3f prerecorded audio exchange is verified:** a 16 kHz synthetic question received the correct spoken answer at 24 kHz, with clear playback confirmed by the user. Six offline desktop-client tests pass. The next checkpoint is authenticated Worker/session access from the development ESP32; its firmware still runs the local diagnostic sequence. [Audio question, replay and results](docs/DESKTOP_AUDIO.md).
+**Phase 3f prerecorded audio exchange is verified:** a 16 kHz synthetic question received the correct spoken answer at 24 kHz, with clear playback confirmed by the user. Six offline desktop-client tests pass. [Audio question, replay and results](docs/DESKTOP_AUDIO.md).
+
+**Phase 4a ESP32 session requests are verified:** the `session` profile is flashed on COM26, private device-credential provisioning and HTTPS rejection/success checks pass, and local capture/cue recovery works during a request. The user confirms eyes, wake, listening and cue. Wi-Fi stays off at boot; wake remains local. Direct Gemini WebSocket/audio transport is next. [Firmware behavior, commands and results](docs/ESP32_SESSIONS.md).
 
 Based on [TechTalkies/Xiaozhi-for-XiaoESP32S3](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3), preserving the supplied licenses and attribution.

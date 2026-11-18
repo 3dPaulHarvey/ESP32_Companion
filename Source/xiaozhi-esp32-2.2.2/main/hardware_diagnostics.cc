@@ -8,6 +8,9 @@
 #include "display.h"
 #include "local_companion_cycle.h"
 #include "audio/local_pcm_capture.h"
+#if CONFIG_COMPANION_SESSION_PROBE
+#include "companion/session_probe.h"
+#endif
 
 #include <atomic>
 #include <cmath>
@@ -29,6 +32,11 @@
 
 namespace {
 constexpr char kTag[] = "HardwareDiagnostics";
+#if CONFIG_COMPANION_SESSION_PROBE
+constexpr char kCloudMode[] = "manual-session-probe";
+#else
+constexpr char kCloudMode[] = "disabled";
+#endif
 constexpr double kPi = 3.14159265358979323846;
 ESP_EVENT_DEFINE_BASE(DIAGNOSTIC_WIFI_EVENT);
 
@@ -107,7 +115,7 @@ const char* WifiEventName(WifiEvent event) {
     auto usb_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_config));
     usb_serial_jtag_vfs_use_driver();
-    ESP_LOGI(kTag, "MODE local diagnostics; cloud=disabled; WiFi=off");
+    ESP_LOGI(kTag, "MODE local diagnostics; cloud=%s; WiFi=off", kCloudMode);
     auto& board = Board::GetInstance();
     auto& display = *board.GetDisplay();
     auto& codec = *board.GetAudioCodec();
@@ -155,7 +163,10 @@ const char* WifiEventName(WifiEvent event) {
         ? ESP_OK : ESP_FAIL);
     PrintHelp();
     PrintMemory();
-    ESP_LOGI(kTag, "WAKE_READY count=0 phrase=Hi,ESP WiFi=off cloud=disabled");
+    ESP_LOGI(kTag, "WAKE_READY count=0 phrase=Hi,ESP WiFi=off cloud=%s", kCloudMode);
+#if CONFIG_COMPANION_SESSION_PROBE
+    CompanionSessionProbe::Initialize();
+#endif
 
     auto& wifi = WifiManager::GetInstance();
     bool wifi_active = false;
@@ -177,14 +188,14 @@ const char* WifiEventName(WifiEvent event) {
     uint32_t capture_request_id = 0;
     uint32_t completed_reported = 0;
     const char* abort_reason = "none";
-    ESP_LOGI("LocalCompanion", "STATE IDLE mode=bounded-pcm-capture capture=local-2s cloud=disabled");
+    ESP_LOGI("LocalCompanion", "STATE IDLE mode=bounded-pcm-capture capture=local-2s cloud=%s", kCloudMode);
 
     auto arm_wake = [&]() {
         if (!capture_request_pending && !wake_armed) {
             audio.EnableWakeWordDetection(true);
             wake_armed = true;
-            ESP_LOGI(kTag, "WAKE_READY count=%lu WiFi=%s cloud=disabled",
-                static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off");
+            ESP_LOGI(kTag, "WAKE_READY count=%lu WiFi=%s cloud=%s",
+                static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off", kCloudMode);
         }
     };
 
@@ -247,10 +258,13 @@ const char* WifiEventName(WifiEvent event) {
 
     while (true) {
         const int64_t now = esp_timer_get_time();
+#if CONFIG_COMPANION_SESSION_PROBE
+        CompanionSessionProbe::Poll(now);
+#endif
         if (wifi_stop_pending && wifi_stop_complete.exchange(false, std::memory_order_acquire)) {
             wifi_active = false;
             wifi_stop_pending = false;
-            ESP_LOGI(kTag, "WIFI off; wake remains local; cloud=disabled");
+            ESP_LOGI(kTag, "WIFI off; wake remains local; cloud=%s", kCloudMode);
         }
         LocalPcmCaptureResult capture_result;
         if (audio.PollLocalCaptureResult(capture_result)) {
@@ -284,8 +298,8 @@ const char* WifiEventName(WifiEvent event) {
         const uint32_t observed_wakes = wake_count.load(std::memory_order_relaxed);
         if (observed_wakes != handled_wakes) {
             handled_wakes = observed_wakes;
-            ESP_LOGI(kTag, "WAKE_DETECTED count=%lu WiFi=%s cloud=disabled",
-                static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off");
+            ESP_LOGI(kTag, "WAKE_DETECTED count=%lu WiFi=%s cloud=%s",
+                static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off", kCloudMode);
             begin_cycle(now, "voice");
         }
         const auto previous = cycle.state();
@@ -309,6 +323,12 @@ const char* WifiEventName(WifiEvent event) {
 
         char command = 0;
         if (read(STDIN_FILENO, &command, 1) == 1) {
+#if CONFIG_COMPANION_SESSION_PROBE
+            if (CompanionSessionProbe::HandleSerialByte(command, now)) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+                continue;
+            }
+#endif
             switch (command) {
                 case 'h': PrintHelp(); break;
                 case 'n': begin_cycle(now, "serial"); break;
@@ -322,12 +342,15 @@ const char* WifiEventName(WifiEvent event) {
                     break;
                 case 's':
                     PrintMemory();
-                    ESP_LOGI(kTag, "STATUS wakes=%lu WiFi=%s connected=%d cloud=disabled",
-                        static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off", wifi.IsConnected());
+                    ESP_LOGI(kTag, "STATUS wakes=%lu WiFi=%s connected=%d cloud=%s",
+                        static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off", wifi.IsConnected(), kCloudMode);
                     ESP_LOGI("LocalCompanion", "STATUS state=%s started=%lu completed=%lu voice_started=%lu serial_started=%lu aborted=%lu capture=local-2s pending=%d",
                         LocalCompanionCycle::StateName(cycle.state()), static_cast<unsigned long>(cycle.started()),
                         static_cast<unsigned long>(cycle.completed()), static_cast<unsigned long>(voice_cycles),
                         static_cast<unsigned long>(serial_cycles), static_cast<unsigned long>(cycle.aborted()), capture_request_pending);
+#if CONFIG_COMPANION_SESSION_PROBE
+                    CompanionSessionProbe::PrintStatus();
+#endif
                     break;
                 case 'd':
                     if (cycle.state() == LocalCompanionState::Idle && !capture_request_pending) {
@@ -357,7 +380,7 @@ const char* WifiEventName(WifiEvent event) {
                         config.station_scan_max_interval_seconds = 30;
                         ESP_ERROR_CHECK(wifi.Initialize(config) ? ESP_OK : ESP_FAIL);
                         wifi.SetEventCallback([](WifiEvent event) {
-                            ESP_LOGI(kTag, "WIFI event=%s cloud=disabled", WifiEventName(event));
+                            ESP_LOGI(kTag, "WIFI event=%s cloud=%s", WifiEventName(event), kCloudMode);
                         });
                         // The existing manager holds its mutex while unregistering Wi-Fi
                         // callbacks during StopStation(). Dispatch shutdown on their own
@@ -371,7 +394,7 @@ const char* WifiEventName(WifiEvent event) {
                     if (!wifi_active) {
                         wifi.StartStation();
                         wifi_active = true;
-                        ESP_LOGI(kTag, "WIFI started with saved credentials; cloud=disabled");
+                        ESP_LOGI(kTag, "WIFI started with saved credentials; cloud=%s", kCloudMode);
                     }
                     break;
                 }
@@ -380,7 +403,7 @@ const char* WifiEventName(WifiEvent event) {
                         wifi_stop_pending = true;
                         ESP_ERROR_CHECK(esp_event_post(DIAGNOSTIC_WIFI_EVENT, 0, nullptr, 0, pdMS_TO_TICKS(100)));
                     } else if (!wifi_active) {
-                        ESP_LOGI(kTag, "WIFI already off; cloud=disabled");
+                        ESP_LOGI(kTag, "WIFI already off; cloud=%s", kCloudMode);
                     }
                     break;
                 case 'r':
@@ -400,8 +423,8 @@ const char* WifiEventName(WifiEvent event) {
         if (connected_now != wifi_connected) {
             wifi_connected = connected_now;
             if (connected_now) {
-                ESP_LOGI(kTag, "WIFI connected ip=%s rssi=%d cloud=disabled",
-                    wifi.GetIpAddress().c_str(), wifi.GetRssi());
+                ESP_LOGI(kTag, "WIFI connected ip=%s rssi=%d cloud=%s",
+                    wifi.GetIpAddress().c_str(), wifi.GetRssi(), kCloudMode);
             } else {
                 ESP_LOGI(kTag, "WIFI disconnected; local audio/display/wake continue");
             }

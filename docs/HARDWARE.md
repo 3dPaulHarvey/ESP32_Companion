@@ -1,6 +1,6 @@
 # Hardware baseline
 
-Last updated: 2026-11-09. Development device: **COM26**.
+Last updated: 2026-11-17. Development device: **COM26**, MAC **44:bd:8d:ec:38:e0**.
 
 ## Verified by hardware probe
 
@@ -9,6 +9,7 @@ Last updated: 2026-11-09. Development device: **COM26**.
 - Chip identification reports embedded **8 MB AP_3v3 PSRAM**. Baseline boot successfully initialized it at 80 MHz and added all 8 MB to the allocator; a separate stress test has not been run.
 - The compiled baseline boots on COM26, initializes OLED/LVGL and simplex I2S, connects to Wi-Fi, and reaches idle. After switching to bundled `wn9_hiesp`, serial confirms that model and the running AFE task. The user confirms working eyes, startup sound, and an English wake response. The wiring below remains source evidence, not a pin-by-pin electrical verification.
 - Local diagnostic firmware now loads the model without cloud startup. User and serial evidence confirm repeated wake/cue/re-arm with Wi-Fi off, face-state cycling, and generated speaker tones. Microphone statistics respond to sound; close/loud input clips and input headroom still needs calibration before voice streaming. Saved-credential Wi-Fi connection and device-side reconnect passed; AP power-off/on was skipped by the user.
+- Phase 4a's current session profile passes private NVS device-credential provisioning, certificate-verified HTTPS 401/200 checks, credential persistence, and a local capture/cue cycle during a successful request. The user confirms eyes/wake/listening/cue after flashing. Wi-Fi remains off at boot; direct Gemini WebSocket and audio streaming are not implemented in this checkpoint. [Session profile/results](ESP32_SESSIONS.md).
 
 ## Wiring to preserve
 

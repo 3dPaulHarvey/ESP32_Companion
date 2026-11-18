@@ -80,7 +80,8 @@ Cloudflare currently lists Windows 11 as the supported Windows platform for Wran
 2. **Complete:** store the device credential as a Production Secret and verify missing/wrong rejection plus correct-credential success over HTTPS.
 3. **Complete:** shared request limits, retry responses and recovery are verified locally and online. Wrangler is authorized and deploys the binding/migration plus code together. See [RATE_LIMITS.md](RATE_LIMITS.md).
 4. **Complete:** current model/token schema checked, permanent key saved as a Production Secret, hosted token issuance and a desktop Gemini setup acknowledgment verified. User reports a Free-tier project; remaining quota is not measured by this check.
-5. **Desktop speech and prerecorded exchange complete:** user confirms clear playback and a correct spoken answer to the 16 kHz audio question. Next prove authenticated Worker/session access on COM26, then add embedded audio transport and finish microphone checks. [Audio exchange results](DESKTOP_AUDIO.md).
+5. **Desktop speech and prerecorded exchange complete:** user confirms clear playback and a correct spoken answer to the 16 kHz audio question. [Audio exchange results](DESKTOP_AUDIO.md).
+6. **ESP32 session request complete:** COM26 passes authenticated HTTPS session checks and local-cycle recovery. Next add direct Gemini WebSocket setup, then embedded audio exchange and microphone checks. [ESP32 session results](ESP32_SESSIONS.md).
 
 The permanent Gemini key belongs in the server secret workflow. It is not needed in chat, firmware or the health test.
 

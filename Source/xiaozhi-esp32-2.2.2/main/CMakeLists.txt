@@ -44,6 +44,10 @@ if(CONFIG_COMPANION_HARDWARE_DIAGNOSTICS)
     list(APPEND SOURCES "hardware_diagnostics.cc")
 endif()
 
+if(CONFIG_COMPANION_SESSION_PROBE)
+    list(APPEND SOURCES "companion/session_probe.cc" "../tests/companion_session_policy_test.cpp")
+endif()
+
 # Add board common files
 list(APPEND SOURCES
     "boards/common/board.cc"
@@ -831,6 +835,8 @@ idf_component_register(SRCS ${SOURCES}
                         console
                         efuse
                         bt
+                        esp_http_client
+                        mbedtls
                     )
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME

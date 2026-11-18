@@ -384,3 +384,36 @@ After the existing constrained setup acknowledgment, the new audio-question mode
 Evidence: `logs/gemini-input-question.json`, `worker-gemini-audio-check.log`, `worker-gemini-audio-check.transcript.txt`, `worker-gemini-audio-wave-validation.log`, `worker-gemini-audio-listener-check.log` and `worker-gemini-audio-desktop-tests.log`. Repeat commands are documented in [DESKTOP_AUDIO.md](DESKTOP_AUDIO.md). The earlier 20 Worker tests were not repeated because Worker code/configuration did not change; this increment's six desktop tests cover its new sender and existing client modes.
 
 **Desktop prerecorded audio exchange passed, including listener confirmation.** This does not verify the robot's microphone: the fixture is 2.41 seconds, longer than its current two-second local capture. Next prove authenticated Worker/session access from the development ESP32, then add embedded Gemini transport and check microphone headroom/capture duration before live conversation.
+
+## 2026-11-17 - Phase 4a: ESP32 authenticated session requests verified
+
+COM26 was present and independently identified as the original development ESP32-S3, MAC `44:bd:8d:ec:38:e0`. COM23 was also enumerated but never opened or flashed. Saved a new full-flash pre-session backup under `recovery/2026-11-17-phase-4a/`, verified 8,388,608 bytes / SHA256 `b9402e8fd52be5176e8cd421837098fc1d8e4f5eee6807b86ef933f1b7e68f9a`. The original recovery image was not overwritten.
+
+Added a separate `session` profile, output directory/generated configuration, and `COMPANION_SESSION_PROBE` opt-in. It retains local diagnostics, Wi-Fi-off boot and local wake behavior. A private non-echoed USB frame provisions the existing device credential into NVS only after the host verifies the profile and board MAC. Input frames enforce exact lowercase-hex length, bounded time, invalid-frame draining and clearing. The permanent Gemini key stays in Cloudflare and is never provisioned to the ESP32. The application binary was scanned for absence of the real device credential; the flash map excludes NVS. The wrapper verifies COM26/MAC before session-profile flashing.
+
+Manual serial g/b/u requests run in a separate task. They use the fixed Worker HTTPS endpoint, certificate bundle, hostname checking and certificate-date checking. The prior diagnostic configuration had date checking disabled, so the new profile explicitly enables it. Compile guards reject insecure TLS, disabled certificate/date support and maximum DEBUG/VERBOSE logging. SNTP is bounded to 15 seconds when needed; the HTTP phase has its own 15-second deadline. Redirects are disabled. The client drains SDK-cached response data, enforces the 16 KiB body bound, validates exact headers/schema/model/endpoint/expiry, and clears owned credential/Authorization/response buffers before task exit. Temporary credentials are inspected only by a flat borrowed-view parser, then discarded. No Gemini WebSocket or audio upload is implemented in this increment.
+
+The first build exposed an ESP-IDF component-discovery issue: configuration-dependent requirements omitted esp_http_client's header/Kconfig during the initial requirements pass. Declaring the component requirements unconditionally resolved it; the session sources remain profile-gated. All 23 constexpr policy/framing assertions then compiled. The first flashed hardware run correctly rejected Wi-Fi-off access but its new `%lld` timing field was incompatible with the existing nano formatter, so the host checker timed out. A metadata-only follow-up identified the nonnumeric elapsed field. Switched the bounded millisecond log to `%lu`, rebuilt and reflashed; the full hardware check then passed. No provider call or credential provisioning occurred in that first aborted run.
+
+| Final check | Observed result |
+|---|---|
+| Policy assertions | PASS: 23 compile-time assertions for credential format, dates, schema/expiry, duplicate/oversize rejection and provisioning frame completion/timeout/clearing |
+| Host checker unit tests | PASS: six offline tests for board identity, metadata, split credential-echo suppression, fault/output bounds and invalid response metadata |
+| Build/flash | PASS: final application 2,563,424 bytes (17% app-partition space free); guarded COM26 flash verified hashes and reset |
+| TLS configuration | PASS: CA bundle/name/date checking enabled; insecure TLS and excessive logging refused by compile guards |
+| Offline guard | PASS before and after network tests: local HTTP-0/wifi-required result, no outbound session request |
+| Provisioning | PASS: partial frame rejected; correct private frame saved; configured state persists after reset |
+| Wi-Fi | PASS: connects with existing saved credentials; device-side shutdown succeeds |
+| Wrong credential | PASS: 401 exact rejection/challenge, 3,340 ms; duplicate command rejected as busy |
+| Missing credential | PASS: 401 exact rejection/challenge, 3,617 ms |
+| Correct credential | PASS twice: 200 exact session contract, 3,953 ms and 3,364 ms; token contents never printed/stored |
+| Local work during HTTPS | PASS: 32,000-sample/64,000-byte local capture and cue/idle recovery during the first 200 request |
+| Local work after shutdown | PASS: offline capture/cue/idle recovery |
+| Quiet reboot | PASS: credential remains configured; Wi-Fi off and no automatic session request |
+| Physical follow-up | PASS: user confirms eyes, wake, listening and cue all work |
+| Memory observations | Internal minimum 67,391 bytes; active-Wi-Fi snapshots 87,651 / 86,103 / 89,243 bytes free; no panic detected by the checker |
+| Earlier diagnostics build | PASS after the shared CMake change; not flashed over the verified session profile |
+
+Final application SHA256: `acfd56d8a4c69081a98876be4127efcb1a3feb18699ce937ecc01a21d14f7d8c`. Configuration/app metadata: `logs/esp32-session-build-metadata.json`. Other evidence: `esp32-session-build-final.log`, `esp32-session-flash-final.log`, `esp32-session-hardware-verified.log`, `esp32-session-host-unit-tests.json`, `esp32-session-physical-followup.json` and `esp32-session-diagnostics-regression-build.log`. Host logs contain only controlled statuses/timings/heap metadata; raw serial output is not saved. Production Worker source/deployment and dependency lock are unchanged.
+
+**Phase 4a control-request checkpoint passed on the ESP32.** The temporary response is discarded rather than used to connect to Gemini. Forced device 429/recovery, extended memory soak, direct WebSocket setup and live audio remain later checks. The existing shared backend limit was already verified in Phase 3c. Development credential storage uses ordinary NVS; this profile does not add encryption at rest. Microphone headroom and capture duration remain open before voice streaming. See [ESP32_SESSIONS.md](ESP32_SESSIONS.md).

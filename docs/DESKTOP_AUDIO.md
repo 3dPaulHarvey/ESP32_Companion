@@ -56,4 +56,4 @@ The offline tests verify exact PCM reconstruction from the sent frames, format/p
 
 Evidence: `logs/gemini-input-question.json`, `worker-gemini-audio-check.log`, `worker-gemini-audio-check.transcript.txt`, `worker-gemini-audio-wave-validation.log` and `worker-gemini-audio-listener-check.log`. The six offline test results are recorded in `worker-gemini-audio-desktop-tests.log`. Generated WAV/PCM/transcript files remain outside Git.
 
-Next: prove TLS/time/network setup and authenticated Worker session access on COM26, then add embedded Gemini audio transport. Microphone headroom and capture duration remain open checks before live robot conversation.
+Authenticated Worker session access on COM26 has now passed with CA/hostname/date validation, private credential provisioning and local-cycle recovery. [ESP32 session results](ESP32_SESSIONS.md). Next add direct Gemini WebSocket setup and embedded audio exchange. Microphone headroom and capture duration remain open before live robot conversation.
