@@ -21,9 +21,10 @@ We will verify the cloud stage in small steps:
 
 1. **Done locally:** create a Worker with a simple health response and test its success/error routes.
 2. **Done hosted:** the user deployed the health-only service and its HTTPS success/error responses passed verification.
-3. Add device authentication and verify that invalid requests are rejected.
-4. Store the Gemini key as a Worker secret and test temporary-token issuance.
-5. Prove a desktop Gemini connection and voice response before adding embedded transport.
-6. Connect the ESP32 only after those checks pass.
+3. **Done hosted:** device authentication rejects missing/wrong credentials and accepts the correct one.
+4. Add request limits before enabling provider calls.
+5. Store the Gemini key as a Worker secret and test temporary-token issuance.
+6. Prove a desktop Gemini connection and voice response before adding embedded transport.
+7. Connect the ESP32 only after those checks pass.
 
 We will check current free-tier eligibility/limits and model availability at that stage; owning an API key does not by itself establish quota or cost. The Worker handles small control requests; the intended voice stream runs directly between the ESP32 and Gemini.

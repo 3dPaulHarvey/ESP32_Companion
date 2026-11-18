@@ -2,7 +2,7 @@
 
 Phase 3b adds a small **POST `/device/check`** route. It proves that a caller knows the one development robot's shared credential before we implement Gemini session issuance. `/health` remains public. This increment makes no Gemini requests, stores no voice and does not change the ESP32 firmware.
 
-Status on 2026-11-17: the user saved a **Production Secret** and deployed the updated code. Local runtime/HTTP/packaging checks pass. Hosted missing/incorrect credential checks pass, but the current local credential also receives 401. **Hosted authentication remains incomplete; synchronize the Production secret with the current local file, then retry.** Public health still passes.
+Status on 2026-11-17: **local and hosted authentication checks pass**. After the user synchronized the Production Secret with the current local value, hosted missing/wrong credentials returned 401 and the correct credential returned 200. Public health still passes. This proves the desktop-to-Worker authentication checkpoint; Gemini and ESP32 cloud integration remain later work.
 
 ## Publish this increment
 
@@ -41,7 +41,7 @@ Useful failure clues:
 | 503 | Production secret is absent or malformed; verify its exact name and 64 lowercase hex characters without surrounding quotes |
 | 401 for the correct-credential test | The Production secret and current local token do not match |
 
-The first hosted run reached that last condition: all three POST requests returned 401. The handler is deployed and its configuration passes the required format check. A different saved value is the likely cause, particularly after the earlier rotation. Edit the existing Production `DEVICE_AUTH_TOKEN` Secret, replace its value with the current 64 characters inside the local file's quotes, and save/deploy. Close the private file before replying. There is no need to send its value in chat.
+The first hosted run reached that last condition: all three POST requests returned 401. Re-saving the existing Production Secret from the current local file resolved it, and all three cases now pass. For a future mismatch, synchronize the same way and close the private file before replying. There is no need to send its value in chat.
 
 ## Local development
 

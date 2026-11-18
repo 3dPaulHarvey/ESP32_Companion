@@ -54,7 +54,7 @@ This local stage needs no Cloudflare login or Gemini API key. The development se
 | Other methods on `/health` | `405`, `Allow: GET, HEAD` |
 | Other routes, including `/device/session` | `404` |
 
-The handler makes no Gemini or other outbound service requests. It contains no embedded credentials. The hosted health-only version is verified; a local device-authentication check is now prepared and tested. See [DEVICE_AUTH.md](DEVICE_AUTH.md) to publish and verify that next increment. Gemini session issuance remains unimplemented.
+The handler makes no Gemini or other outbound service requests. It contains no embedded credentials. Both hosted health and device authentication are verified. See [DEVICE_AUTH.md](DEVICE_AUTH.md) for the authentication contract and repeatable checks. Gemini session issuance remains unimplemented.
 
 ## Tooling and files
 
@@ -74,13 +74,14 @@ Cloudflare currently lists Windows 11 as the supported Windows platform for Wran
 ## Next checkpoint
 
 1. **Complete:** publish the health-only Worker and verify its HTTPS URL.
-2. Add a device credential as an encrypted Worker secret, then implement a small authentication check. Missing/wrong credentials must be rejected, and the correct credential must succeed before adding session issuance or Gemini. Add request limits before enabling provider calls.
-3. Verify Gemini Live's current model/token support and quota, then store the permanent key as a Worker secret and test token issuance.
-4. Prove a desktop Gemini connection before joining it to the ESP32. Finish microphone headroom calibration before voice streaming.
+2. **Complete:** store the device credential as a Production Secret and verify missing/wrong rejection plus correct-credential success over HTTPS.
+3. Add request limits before enabling provider calls.
+4. Verify Gemini Live's current model/token support and quota, then store the permanent key as a Worker secret and test token issuance.
+5. Prove a desktop Gemini connection before joining it to the ESP32. Finish microphone headroom calibration before voice streaming.
 
 The permanent Gemini key belongs in the server secret workflow when we reach that step. It is not needed in chat, firmware or the health test.
 
-## Device credential: code deployed, credential matching pending
+## Device credential: hosted authentication verified
 
 A random 256-bit device credential has been generated in the Git-ignored `cloudflare-worker/.dev.vars` file. Its name is `DEVICE_AUTH_TOKEN`. The first value was exposed by an IDE text selection and was replaced locally without printing its replacement. The user has now confirmed saving the replacement as a Production Secret. This is the robot's shared credential, separate from a Gemini API key or a Cloudflare account/deployment token.
 
@@ -91,6 +92,6 @@ In the Worker's Settings, under **Runtime variables and secrets**, use **Add var
 3. Open the local `.dev.vars` file and copy only the 64 characters inside the quotes into Value.
 4. Save/deploy the change. Report only that the secret was saved; keep its value out of chat and screenshots.
 
-The local authentication handler and checker pass correct/missing/wrong credential tests. The user has deployed that handler, but hosted tests reject the current local credential along with missing/wrong credentials. Re-save the existing Production secret from the current local file, then retry; see [DEVICE_AUTH.md](DEVICE_AUTH.md). Public `/health` still passes. No ESP32 flash or Gemini session is involved in this increment.
+The local and hosted authentication handler/checker pass correct/missing/wrong credential tests. The first hosted attempt found a mismatch; re-saving the current local value as the Production Secret resolved it. Public `/health` still passes. See [DEVICE_AUTH.md](DEVICE_AUTH.md). No ESP32 flash or Gemini session is involved in this increment.
 
 Official references checked for this checkpoint: [Wrangler installation and requirements](https://developers.cloudflare.com/workers/wrangler/install-and-update/), [local development](https://developers.cloudflare.com/workers/local-development/), [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/), and [Miniflare testing](https://developers.cloudflare.com/workers/testing/miniflare/). Actual tests use the API shipped in the pinned packages. See [TEST_LOG.md](TEST_LOG.md) for the recorded results.

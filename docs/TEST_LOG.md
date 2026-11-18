@@ -238,3 +238,21 @@ After the user reported deploying the new handler, the desktop checker observed 
 Follow-up public checks verified `GET /health`=200 with its exact payload/no-store header and `GET /device/check`=405 with `Allow: POST`. The hosted handler is active and health remains functional. No token value was printed or logged. Evidence: `logs/worker-auth-hosted-mismatch.log`. The older `worker-device-auth-check.log` still records the successful local run, because the checker only writes that file after a complete pass.
 
 **Hosted authentication remains unverified.** Next action: edit the existing Production `DEVICE_AUTH_TOKEN` Secret to match the current local private file, deploy that change, then rerun the three-case checker. No firmware or authentication-code change is indicated by this result, and no Gemini call was made.
+
+## 2026-11-17 — Hosted device authentication verified
+
+The user replaced the existing Production Secret with the current local value and deployed that change. The unchanged desktop checker then passed all three cases against `https://esp32-companion-control.stiener.workers.dev`:
+
+| Case | Result |
+|---|---|
+| Missing credential | PASS: 401 with exact unauthorized response/challenge |
+| Incorrect credential | PASS: 401 with exact unauthorized response/challenge |
+| Correct current local credential | PASS: 200 with exact `{"authenticated":true}` |
+| Response headers | PASS: JSON content type and no-store checked for each auth response |
+| Public health follow-up | PASS: GET `/health`=200 with exact payload and no-store, using the usual Companion client identifier |
+
+The initial mismatch was resolved by synchronizing the secret; no token regeneration or code change was needed. No credential value was printed/logged, and no audio or Gemini request was sent. Archived hosted results: `logs/worker-auth-hosted-verified.log`; health evidence: `logs/worker-auth-hosted-health-followup.log`. The previous mismatch record remains preserved separately.
+
+One auxiliary health probe using the default Python user agent received HTTP 403. A follow-up using the usual explicit Companion client identifier returned the expected 200 response. No Worker or security settings were changed; the cause of that single 403 was not independently established. The three authentication requests all used the existing Companion checker and passed.
+
+**Hosted authentication checkpoint passed.** This verifies the desktop-to-Worker credential path, not ESP32 transport or Gemini conversation. Next incremental work: request limits before provider calls, then supported Gemini model/quota/token verification. Firmware remains at its earlier local diagnostic checkpoint, and microphone headroom calibration remains open before streaming.
