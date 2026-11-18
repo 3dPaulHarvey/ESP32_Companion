@@ -419,7 +419,9 @@ VoiceStage GetVoiceStage() { return voice_stage.load(); }
 void AcknowledgeVoice() { voice_stage.store(VoiceStage::Idle); }
 #endif
 void Initialize() {
-#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+#if CONFIG_COMPANION_CLOUD_WAKE
+    ESP_LOGI(kTag, "MODE manual-session-probe audio_upload=explicit_or_armed_wake boot_requests=0");
+#elif CONFIG_COMPANION_GEMINI_QUESTION_PROBE
     ESP_LOGI(kTag, "MODE manual-session-probe audio_upload=manual_question_only automatic_requests=0");
 #else
     ESP_LOGI(kTag, "MODE manual-session-probe no_audio_upload=1 automatic_requests=0");
@@ -451,7 +453,11 @@ void PrintStatus() {
     ESP_LOGI(kTag, "VOICE_FEATURE enabled=1 fixed_greeting=1 automatic_requests=0 audio_upload=0");
 #endif
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+#if CONFIG_COMPANION_CLOUD_WAKE
+    ESP_LOGI("CompanionQuestion", "FEATURE enabled=1 explicit_start=1 capture_samples=64000 audio_upload=explicit_or_armed_wake");
+#else
     ESP_LOGI("CompanionQuestion", "FEATURE enabled=1 explicit_start=1 capture_samples=64000 audio_upload=manual_only");
+#endif
 #if COMPANION_QUESTION_FIXTURE
     ESP_LOGI("CompanionQuestion", "FIXTURE_FEATURE enabled=1 microphone=0");
 #endif

@@ -24,9 +24,7 @@ def measurement(quiet=False):
 
 class CalibrationChecks(unittest.TestCase):
     def setUp(self):
-        base = Path(__file__).resolve().parent.parent / "logs" / "calibrator-unit-tests"
-        base.mkdir(parents=True, exist_ok=True)
-        self.temporary = tempfile.TemporaryDirectory(dir=base)
+        self.temporary = tempfile.TemporaryDirectory(prefix="esp32-calibrator-unit-")
         self.root = Path(self.temporary.name)
 
     def tearDown(self):

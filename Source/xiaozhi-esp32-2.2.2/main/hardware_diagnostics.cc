@@ -10,6 +10,7 @@
 #include "audio/local_pcm_capture.h"
 #include "audio/local_capture_config.h"
 #include "audio/calibration_lease.h"
+#include "companion/wake_question_policy.h"
 #if CONFIG_COMPANION_SESSION_PROBE
 #include "companion/session_probe.h"
 #endif
@@ -106,6 +107,9 @@ void PrintCapturePolicy() {
     ESP_LOGI("MicrophonePrep", "FEATURE enabled=1 capture_only=1 wake_shift=12 audio_upload=0");
     ESP_LOGI("MicrophonePrep", "CALIBRATOR_PROTOCOL version=1 lease_ms=10000 recording_event=1");
 #endif
+#if CONFIG_COMPANION_CLOUD_WAKE
+    ESP_LOGI("CloudWake", "FEATURE version=1 single_turn=1 lease_ms=10000 window_ms=60000 boot_armed=0");
+#endif
 }
 
 const char* WifiEventName(WifiEvent event) {
@@ -199,6 +203,9 @@ const char* WifiEventName(WifiEvent event) {
     bool capture_start_failed = false;
     bool wake_armed = true;
     MicrophoneCalibrationLease calibration_lease;
+#if CONFIG_COMPANION_CLOUD_WAKE
+    companion_wake::Arm cloud_wake;
+#endif
     bool manual_voice_active = false;
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
     bool question_capture = false;
@@ -297,6 +304,24 @@ const char* WifiEventName(WifiEvent event) {
         on_transition(previous);
     };
 
+    [[maybe_unused]] auto begin_question = [&](int64_t now, const char* source) {
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+        if (manual_voice_active || question_capture || calibration_lease.held() || capture_request_pending ||
+            cycle.state() != LocalCompanionState::Idle || CompanionSessionProbe::IsBusy() || !audio.IsIdle()) {
+            ESP_LOGW("CompanionQuestion", "REQUEST_REJECTED reason=local_busy"); return false;
+        }
+        if (!wifi.IsConnected()) { ESP_LOGW("CompanionQuestion", "REQUEST_REJECTED reason=wifi_required"); return false; }
+        question_capture = true;
+        CompanionSessionProbe::SetQuestionCaptureGuard(true);
+        ESP_LOGI("CompanionQuestion", "CAPTURE_REQUESTED explicit_start=1 samples=64000");
+        begin_cycle(now, source);
+        return true;
+#else
+        (void)now; (void)source;
+        return false;
+#endif
+    };
+
     while (true) {
         const int64_t now = esp_timer_get_time();
 #if CONFIG_COMPANION_SESSION_PROBE
@@ -307,6 +332,17 @@ const char* WifiEventName(WifiEvent event) {
             CompanionSessionProbe::SetCalibrationGuard(false);
             if (cycle.state() == LocalCompanionState::Idle) arm_wake();
             ESP_LOGI("MicrophonePrep", "CALIBRATOR_RELEASE reason=lease_expired wake_armed=%d", wake_armed);
+        }
+#endif
+#if CONFIG_COMPANION_CLOUD_WAKE
+        const auto wake_expiry = cloud_wake.Expire(now);
+        if (wake_expiry != companion_wake::Arm::Expiry::None) {
+            CompanionSessionProbe::SetQuestionCaptureGuard(false);
+            ESP_LOGI("CloudWake", "DISARMED reason=%s", wake_expiry == companion_wake::Arm::Expiry::Window ? "window_timeout" : "lease_expired");
+        }
+        if (cloud_wake.waiting() && (!wifi.IsConnected() || wifi_stop_pending)) {
+            cloud_wake.Disarm(); CompanionSessionProbe::SetQuestionCaptureGuard(false);
+            ESP_LOGI("CloudWake", "DISARMED reason=wifi_lost");
         }
 #endif
         if (wifi_stop_pending && wifi_stop_complete.exchange(false, std::memory_order_acquire)) {
@@ -390,6 +426,18 @@ const char* WifiEventName(WifiEvent event) {
             handled_wakes = observed_wakes;
             ESP_LOGI(kTag, "WAKE_DETECTED count=%lu WiFi=%s cloud=%s",
                 static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off", kCloudMode);
+#if CONFIG_COMPANION_CLOUD_WAKE
+            if (cloud_wake.Consume(now)) {
+                if (begin_question(now, "voice_question")) {
+                    ESP_LOGI("CloudWake", "TRIGGER cycle=%lu wake_count=%lu source=model",
+                        static_cast<unsigned long>(cycle.started()), static_cast<unsigned long>(handled_wakes));
+                } else {
+                    CompanionSessionProbe::SetQuestionCaptureGuard(false);
+                    ESP_LOGI("CloudWake", "DISARMED reason=trigger_rejected");
+                    begin_cycle(now, "voice");
+                }
+            } else
+#endif
             begin_cycle(now, "voice");
         }
         const auto previous = cycle.state();
@@ -420,6 +468,26 @@ const char* WifiEventName(WifiEvent event) {
             }
 #endif
             switch (command) {
+#if CONFIG_COMPANION_CLOUD_WAKE
+                case 'a':
+                    if (!calibration_lease.held() || cloud_wake.waiting() || manual_voice_active || capture_request_pending ||
+                        cycle.state() != LocalCompanionState::Idle || CompanionSessionProbe::IsBusy() || !audio.IsIdle() || !wifi.IsConnected()) {
+                        ESP_LOGW("CloudWake", "ARM_REJECTED reason=control_busy_or_offline");
+                    } else {
+                        calibration_lease.Release(); CompanionSessionProbe::SetCalibrationGuard(false);
+                        handled_wakes = wake_count.load(std::memory_order_relaxed);
+                        cloud_wake.ArmOnce(now);
+                        CompanionSessionProbe::SetQuestionCaptureGuard(true);
+                        arm_wake();
+                        ESP_LOGI("CloudWake", "CONTROL armed=1 baseline_wakes=%lu lease_ms=10000 window_ms=60000", static_cast<unsigned long>(handled_wakes));
+                    }
+                    break;
+                case 'z':
+                    if (cloud_wake.waiting()) CompanionSessionProbe::SetQuestionCaptureGuard(false);
+                    cloud_wake.Disarm();
+                    ESP_LOGI("CloudWake", "CONTROL armed=0");
+                    break;
+#endif
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
 #if COMPANION_QUESTION_FIXTURE
                 case 'f':
@@ -434,22 +502,24 @@ const char* WifiEventName(WifiEvent event) {
                     break;
 #endif
                 case 'q':
-                    if (manual_voice_active || question_capture || calibration_lease.held() || capture_request_pending ||
-                        cycle.state() != LocalCompanionState::Idle || CompanionSessionProbe::IsBusy() || !audio.IsIdle()) {
-                        ESP_LOGW("CompanionQuestion", "REQUEST_REJECTED reason=local_busy");
-                    } else if (!wifi.IsConnected()) {
-                        ESP_LOGW("CompanionQuestion", "REQUEST_REJECTED reason=wifi_required");
-                    } else {
-                        question_capture = true;
-                        CompanionSessionProbe::SetQuestionCaptureGuard(true);
-                        ESP_LOGI("CompanionQuestion", "CAPTURE_REQUESTED explicit_start=1 samples=64000");
-                        begin_cycle(now, "question");
+#if CONFIG_COMPANION_CLOUD_WAKE
+                    if (cloud_wake.waiting()) {
+                        cloud_wake.Disarm(); CompanionSessionProbe::SetQuestionCaptureGuard(false);
+                        ESP_LOGI("CloudWake", "DISARMED reason=manual_question");
                     }
+#endif
+                    begin_question(now, "question");
                     break;
 #endif
 #if CONFIG_COMPANION_MICROPHONE_PREP
                 case '[':
                     if (cycle.state() == LocalCompanionState::Idle && !capture_request_pending && !manual_voice_active && !CompanionSessionProbe::IsBusy()) {
+#if CONFIG_COMPANION_CLOUD_WAKE
+                        if (cloud_wake.waiting()) {
+                            cloud_wake.Disarm(); CompanionSessionProbe::SetQuestionCaptureGuard(false);
+                            ESP_LOGI("CloudWake", "DISARMED reason=calibration_control");
+                        }
+#endif
                         calibration_lease.Hold(now);
                         CompanionSessionProbe::SetCalibrationGuard(true);
                         audio.EnableWakeWordDetection(false); wake_armed = false;
@@ -459,6 +529,9 @@ const char* WifiEventName(WifiEvent event) {
                     break;
                 case '=':
                     calibration_lease.Heartbeat(now);
+#if CONFIG_COMPANION_CLOUD_WAKE
+                    cloud_wake.Heartbeat(now);
+#endif
                     break;
                 case ']':
                     calibration_lease.Release();
@@ -482,6 +555,12 @@ const char* WifiEventName(WifiEvent event) {
                 case 'h': PrintHelp(); break;
                 case 'n': begin_cycle(now, "serial"); break;
                 case 'x':
+#if CONFIG_COMPANION_CLOUD_WAKE
+                    if (cloud_wake.waiting()) {
+                        cloud_wake.Disarm(); CompanionSessionProbe::SetQuestionCaptureGuard(false);
+                        ESP_LOGI("CloudWake", "DISARMED reason=cancelled");
+                    }
+#endif
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
                     if (manual_question_active) {
                         CompanionSessionProbe::CancelQuestion();
@@ -505,6 +584,9 @@ const char* WifiEventName(WifiEvent event) {
                 case 's':
                     PrintMemory();
                     PrintCapturePolicy();
+#if CONFIG_COMPANION_CLOUD_WAKE
+                    ESP_LOGI("CloudWake", "STATUS armed=%d", cloud_wake.waiting());
+#endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
                     ESP_LOGI("CompanionVoice", "STATUS active=%d speaking=%d wake_armed=%d playback_busy=%d",
                         manual_voice_active, manual_voice_speaking, wake_armed, audio.IsDiagnosticPcmBusy());

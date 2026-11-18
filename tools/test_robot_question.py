@@ -62,9 +62,7 @@ class QuestionChecks(unittest.TestCase):
     def test_cloud_preflight_failure_keeps_start_disabled(self):
         class Unavailable(DemoQuestion):
             def connect(self): raise CheckFailure("Cloud preflight failed; no microphone recording started.")
-        base = Path(__file__).resolve().parent.parent / "logs" / "question-ui-tests"
-        base.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=base) as temp:
+        with tempfile.TemporaryDirectory(prefix="esp32-question-ui-") as temp:
             window = tk.Tk(); app = QuestionApp(window, demo=True, results=Path(temp))
             app.worker.client_factory = Unavailable
             try:
@@ -86,9 +84,7 @@ class QuestionChecks(unittest.TestCase):
                 except tk.TclError: pass
 
     def test_click_flow_autosaves_and_closes_during_capture(self):
-        base = Path(__file__).resolve().parent.parent / "logs" / "question-ui-tests"
-        base.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=base) as temp:
+        with tempfile.TemporaryDirectory(prefix="esp32-question-ui-") as temp:
             window = tk.Tk(); app = QuestionApp(window, demo=True, results=Path(temp))
             callback_errors = []
             window.report_callback_exception = lambda *args: callback_errors.append(args[1])

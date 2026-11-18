@@ -14,6 +14,8 @@ from microphone_calibration_core import AppInstance, atomic_json, utc_now, ROOT
 from microphone_calibrator import Worker
 from microphone_calibration_robot import DemoRobot
 from robot_question_client import QuestionClient
+from robot_wake_client import WakeClient
+from microphone_calibration_robot import TrialCancelled
 
 
 class DemoQuestion(DemoRobot):
@@ -32,30 +34,48 @@ class DemoQuestion(DemoRobot):
             "input_cleared": True, "output": {"ok": 1, "audio_bytes": 96000, "played_samples": 48000}, "microphone": microphone}
 
 
+class DemoWake(DemoQuestion):
+    def capture(self, kind):
+        self.callback("waiting_wake", {"window_ms": 60000})
+        for _ in range(10):
+            if self.cancel.is_set() or self.closing.is_set(): raise TrialCancelled()
+            time.sleep(.05)
+        self.callback("wake_triggered", {"cycle": 1, "wake_count": 1})
+        result = super().capture("question")
+        return {**result, "wake": {"cycle": 1, "wake_count": 1, "baseline_wakes": 0,
+            "trigger_source": "model", "physical_wake_verified": True, "single_turn": True, "demo": True}}
+
+
 class QuestionApp:
-    def __init__(self, window, *, demo=False, results=None):
+    def __init__(self, window, *, demo=False, results=None, wake=False):
         self.window = window
         self.demo = demo
-        self.root = Path(results or ROOT / "logs" / ("robot-question-tests-qa" if demo else "robot-question-tests"))
+        self.wake = wake
+        self.client_factory = (DemoWake if demo else WakeClient) if wake else (DemoQuestion if demo else QuestionClient)
+        prefix = "robot-wake-tests" if wake else "robot-question-tests"
+        self.root = Path(results or ROOT / "logs" / (prefix + ("-qa" if demo else "")))
         identity = datetime.now().astimezone().strftime("%Y-%m-%d_%H-%M-%S") + "_" + uuid.uuid4().hex[:8]
         self.folder = self.root / identity
         self.data = {"schema_version": 1, "demo": demo, "session_id": identity, "created_at": utc_now(),
             "status": "in_progress", "policy": None, "attempts": [], "raw_audio_saved": False,
             "transcript_saved": False, "audio_upload_requires_start": True}
+        if wake: self.data.update(wake_test=True, physical_wake_required=True, one_question_per_arm=True)
         self.events = queue.Queue()
-        self.worker = Worker(self.events, client_factory=DemoQuestion if demo else QuestionClient)
+        self.worker = Worker(self.events, client_factory=self.client_factory)
         self.connected = False; self.busy = False; self.closing = False
         self.current = None; self.countdown_job = None; self.recording_started = None
         self.phase = "disconnected"
         self.save_failed = False
-        window.title("Robot Spoken Question Test" + (" — Demo" if demo else ""))
+        window.title(("Robot Wake Question Test" if wake else "Robot Spoken Question Test") + (" - Demo" if demo else ""))
         window.geometry("920x650"); window.minsize(920, 650)
         window.configure(bg="#edf2f7")
         window.protocol("WM_DELETE_WINDOW", self.finish)
         ttk.Style().configure("TButton", font=("Segoe UI", 11), padding=10)
         panel = tk.Frame(window, bg="#edf2f7", padx=28, pady=24); panel.pack(fill="both", expand=True)
-        tk.Label(panel, text="Ask your robot one question", bg="#edf2f7", fg="#23344a", font=("Segoe UI", 22, "bold")).pack(anchor="w")
-        tk.Label(panel, text="Each Start sends one four-second microphone capture to Gemini.\nNo recording or transcript is saved. Connecting alone starts no question.",
+        tk.Label(panel, text="Wake your robot and ask a question" if wake else "Ask your robot one question", bg="#edf2f7", fg="#23344a", font=("Segoe UI", 22, "bold")).pack(anchor="w")
+        explanation = ("Arm one wake, say Hi, E-S-P, then ask your question when green appears.\nEach arm allows one four-second capture to Gemini. No recording or transcript is saved."
+            if wake else "Each Start sends one four-second microphone capture to Gemini.\nNo recording or transcript is saved. Connecting alone starts no question.")
+        tk.Label(panel, text=explanation,
             bg="#edf2f7", fg="#53677d", font=("Segoe UI", 11), justify="left").pack(anchor="w", pady=(8, 18))
         card = tk.Frame(panel, bg="white", padx=24, pady=20); card.pack(fill="both", expand=True)
         tk.Label(card, text="Sit 1–2 feet from the robot. Wait for green, then say:", bg="white", fg="#23344a", font=("Segoe UI", 12)).pack(anchor="w")
@@ -67,7 +87,7 @@ class QuestionApp:
         tk.Label(card, textvariable=self.hint, bg="white", fg="#53677d", font=("Segoe UI", 11), wraplength=800, justify="center").pack(fill="x", pady=(0, 16))
         row = tk.Frame(card, bg="white"); row.pack(fill="x")
         self.connect_button = ttk.Button(row, text="Connect robot", command=self.connect); self.connect_button.pack(side="left")
-        self.start_button = ttk.Button(row, text="Start question", command=self.start); self.start_button.pack(side="left", padx=10)
+        self.start_button = ttk.Button(row, text="Arm next wake" if wake else "Start question", command=self.start); self.start_button.pack(side="left", padx=10)
         self.stop_button = ttk.Button(row, text="Stop", command=self.stop); self.stop_button.pack(side="left")
         self.confirm = tk.Frame(card, bg="white")
         ttk.Button(self.confirm, text="Yes — clear answer: four", command=lambda: self.feedback(True)).pack(side="left")
@@ -108,7 +128,7 @@ class QuestionApp:
 
     def connect(self):
         if not self.worker.is_alive():
-            self.worker = Worker(self.events, client_factory=DemoQuestion if self.demo else QuestionClient)
+            self.worker = Worker(self.events, client_factory=self.client_factory)
             self.worker.start()
         self.busy = True; self.phase = "connecting"; self.status.set("Connecting…")
         self.hint.set("Checking the robot, Wi-Fi and Gemini before recording. Wait before speaking.")
@@ -116,11 +136,17 @@ class QuestionApp:
 
     def start(self):
         if not self.connected or self.busy: return
-        self.current = {"started_at": utc_now(), "state": "countdown", "human_confirmed": None}
+        self.current = {"started_at": utc_now(), "state": "waiting_wake" if self.wake else "countdown", "human_confirmed": None}
         self.data["attempts"].append(self.current)
         if not self.save(): self.refresh(); return
-        self.busy = True; self.phase = "countdown"; self.refresh()
-        self.countdown(1 if self.demo else 3)
+        self.busy = True
+        self.status_label.configure(fg="#176b89")
+        if self.wake:
+            self.phase = "question"; self.status.set("Arming...")
+            self.hint.set('Say "Hi, E-S-P" once, then wait for green before asking the question.')
+            self.refresh(); self.worker.commands.put(("capture", {"kind": "wake_question"}))
+        else:
+            self.phase = "countdown"; self.refresh(); self.countdown(1 if self.demo else 3)
 
     def countdown(self, left):
         if self.closing or self.phase != "countdown": return
@@ -143,7 +169,8 @@ class QuestionApp:
 
     def feedback(self, passed):
         self.current.update(state="verified_by_user" if passed else "user_reported_problem", human_confirmed=passed, reviewed_at=utc_now())
-        self.save(); self.status.set("Result saved"); self.hint.set("Finish & close, or start another question when ready."); self.refresh()
+        self.save(); self.status.set("Result saved")
+        self.hint.set("Arm again when ready. Try three separate wake/question/answer cycles, then Finish & close." if self.wake else "Finish & close, or start another question when ready."); self.refresh()
 
     def finish(self):
         if self.closing: return
@@ -161,7 +188,7 @@ class QuestionApp:
             while True:
                 name, data, when = self.events.get_nowait()
                 if name == "closed":
-                    if self.current and self.current["state"] in {"countdown", "recording"}:
+                    if self.current and self.current["state"] in {"countdown", "waiting_wake", "recording"}:
                         self.current.update(state="interrupted", ended_at=utc_now())
                     self.data.update(status="closed", closed_at=utc_now())
                     if self.save(): self.window.destroy(); return
@@ -170,9 +197,18 @@ class QuestionApp:
                 if name == "connected":
                     self.connected = True; self.busy = False; self.phase = "idle"
                     self.data["policy"] = data; self.save()
-                    self.status.set("Ready when you are"); self.hint.set("Click Start question. No need to coordinate with chat.")
+                    self.status.set("Ready when you are")
+                    self.hint.set("Click Arm next wake when ready. Connecting starts no question." if self.wake else "Click Start question. No need to coordinate with chat.")
                 elif name == "preflight":
                     self.data["cloud_preflight"] = data["measurement"]; self.save()
+                elif name == "waiting_wake" and self.current:
+                    self.status.set("Say Hi, E-S-P")
+                    self.hint.set("Say the letters E, S and P. You have one minute; Stop cancels this arm.")
+                elif name == "wake_triggered" and self.current:
+                    self.current["wake_trigger"] = data; self.save()
+                    if self.recording_started is None:
+                        self.status.set("Wake heard - preparing...")
+                        self.hint.set("Wait for green, then ask the question once.")
                 elif name == "recording" and self.current:
                     self.current["state"] = "recording"; self.recording_started = when; self.save()
                     self.status_label.configure(fg="#138362"); self.hint.set("Speak to the ROBOT now. Say the question once at normal volume.")
@@ -192,7 +228,7 @@ class QuestionApp:
                     self.status.set("Cancelled — ready to retry")
                 elif name == "error":
                     self.recording_started = None; self.busy = False; self.connected = False; self.phase = "disconnected"
-                    if self.current and self.current["state"] in {"countdown", "recording"}:
+                    if self.current and self.current["state"] in {"countdown", "waiting_wake", "recording"}:
                         self.current.update(state="error", ended_at=utc_now(), error=data["message"])
                     self.data["last_error"] = data["message"]
                     self.save(); self.status.set("Reconnect and retry"); self.hint.set(data["message"])
@@ -203,15 +239,16 @@ class QuestionApp:
         self.window.after(50, self.process_events)
 
 
-def main():
+def main(*, wake=False):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--demo", action="store_true")
     args = parser.parse_args()
     window = tk.Tk(); window.withdraw(); instance = None
     try:
-        root = ROOT / "logs" / ("robot-question-tests-qa" if args.demo else "robot-question-tests")
+        prefix = "robot-wake-tests" if wake else "robot-question-tests"
+        root = ROOT / "logs" / (prefix + ("-qa" if args.demo else ""))
         instance = AppInstance(root)
-        QuestionApp(window, demo=args.demo, results=root)
+        QuestionApp(window, demo=args.demo, results=root, wake=wake)
         window.deiconify(); window.mainloop()
     except (OSError, RuntimeError, ValueError) as error:
         messagebox.showerror("Robot question test", str(error), parent=window)

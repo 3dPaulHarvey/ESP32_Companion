@@ -12,9 +12,7 @@ import microphone_calibrator as gui
 
 class CalibratorUI(unittest.TestCase):
     def test_self_paced_review_cancel_resume_and_close(self):
-        base = Path(__file__).resolve().parent.parent / "logs" / "calibrator-ui-tests"
-        base.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=base) as temporary:
+        with tempfile.TemporaryDirectory(prefix="esp32-calibrator-ui-") as temporary:
             original = gui.QA_RESULTS
             gui.QA_RESULTS = Path(temporary)
             window = tk.Tk()

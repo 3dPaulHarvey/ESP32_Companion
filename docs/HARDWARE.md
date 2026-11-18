@@ -15,6 +15,8 @@ Last updated: 2026-11-18. Development device: **COM26**, MAC **44:bd:8d:ec:38:e0
 - Phase 4d's calibrator supplied three accepted quiet and three speech samples, with zero clipping at shift 14 and 12.72 dB level contrast. Capture shift 15 was applied for extra headroom; wake stays at 12. [Calibration procedure/results](MICROPHONE_CALIBRATOR.md).
 - Phase 4e's current `question` profile passes a real microphone question and correct audible Gemini answer, confirmed by the user. The saved result verifies four-second capture, complete upload, exact 3.8-second reply playback, zero input/output clipping and READY recovery. Normal wake/calibration stay local and Wi-Fi is off at boot. [Question results and repeat procedure](ESP32_QUESTIONS.md).
 
+COM26 now runs the **wake** profile: an explicit Desktop arm permits one physical Hi, E-S-P event to use the verified question path. Ten unattended board guard/recovery checks pass with no question upload. Three subsequent real wake/question/answer/READY cycles pass with correct clear answers confirmed by the user and zero input/output clipping. Boot remains offline and unarmed; microphone gain/window and wiring are unchanged. [Wake results and repeat test](ESP32_WAKE.md).
+
 ## Wiring to preserve
 
 Working source: `Source/xiaozhi-esp32-2.2.2/`. Original reference remains under `_Reference_Code/Xiaozhi-for-XiaoESP32S3-master/`.

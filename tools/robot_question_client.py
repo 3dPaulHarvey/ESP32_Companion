@@ -58,7 +58,7 @@ class QuestionClient(RobotClient):
         self.hold(False)  # Release any old app lease before the setup-only check.
         d = self.device
         start = d.send(b"s")
-        d.wait(r"CompanionQuestion: FEATURE enabled=1 explicit_start=1 capture_samples=64000 audio_upload=manual_only", start)
+        d.wait(r"CompanionQuestion: FEATURE enabled=1 explicit_start=1 capture_samples=64000 audio_upload=(?:manual_only|explicit_or_armed_wake)", start)
         if policy["pcm_shift"] != 15:
             raise CheckFailure("The robot must run the calibrated question firmware (capture shift 15).")
         start = d.send(b"w")

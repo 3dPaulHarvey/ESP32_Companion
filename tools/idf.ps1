@@ -2,21 +2,23 @@ param(
     [ValidateSet('build', 'flash', 'monitor', 'reconfigure', 'merge-bin')]
     [string]$Action = 'build',
     [string]$Port = 'COM26',
-    [ValidateSet('baseline', 'diagnostics', 'session', 'gemini', 'voice', 'microphone', 'question')]
+    [ValidateSet('baseline', 'diagnostics', 'session', 'gemini', 'voice', 'microphone', 'question', 'wake')]
     [string]$Profile = 'baseline',
+    [string]$BuildRoot,
     [switch]$FixtureCheck
 )
 
 $ErrorActionPreference = 'Stop'
 if ($FixtureCheck -and $Profile -ne 'question') { throw 'The synthetic fixture is restricted to the question diagnostic profile.' }
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$externalBuildRoot = if ($BuildRoot) { [System.IO.Path]::GetFullPath($BuildRoot) } else { $null }
 $firmwareRoot = Join-Path $projectRoot 'Source\xiaozhi-esp32-2.2.2'
 $activation = 'C:\Espressif\tools\Microsoft.v5.5.2.PowerShell_profile.ps1'
 if (-not (Test-Path -LiteralPath $activation)) {
     throw "ESP-IDF v5.5.2 activation script missing: $activation"
 }
 . $activation
-if ($Profile -in @('session', 'gemini', 'voice', 'microphone', 'question') -and $Action -eq 'flash') {
+if ($Profile -in @('session', 'gemini', 'voice', 'microphone', 'question', 'wake') -and $Action -eq 'flash') {
     if ($Port -ne 'COM26') { throw 'Cloud diagnostic profiles may be flashed only to the development board on COM26.' }
     $identityOutput = & "$env:IDF_PYTHON_ENV_PATH\Scripts\python.exe" -m esptool --chip esp32s3 --port $Port read_mac 2>&1
     if ($LASTEXITCODE -ne 0 -or ($identityOutput -join "`n") -notmatch '(?i)MAC: 44:bd:8d:ec:38:e0') {
@@ -43,11 +45,19 @@ try {
         $idfArguments = @('-B', 'build-voice', '-DIDF_TARGET=esp32s3',
             '-DSDKCONFIG=sdkconfig.voice.generated',
             '-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.baseline;config/diagnostics.defaults;config/session.defaults;config/gemini.defaults;config/voice.defaults')
-    } elseif ($Profile -in @('microphone', 'question')) {
+    } elseif ($Profile -in @('microphone', 'question', 'wake')) {
         $captureDefaults = 'sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.baseline;config/diagnostics.defaults;config/session.defaults;config/gemini.defaults;config/voice.defaults;config/microphone.defaults'
-        if ($Profile -eq 'question') { $captureDefaults += ';config/question.defaults' }
+        if ($Profile -in @('question', 'wake')) { $captureDefaults += ';config/question.defaults' }
+        if ($Profile -eq 'wake') { $captureDefaults += ';config/wake.defaults' }
         $idfArguments = @('-B', "build-$Profile", '-DIDF_TARGET=esp32s3',
             "-DSDKCONFIG=sdkconfig.$Profile.generated", "-DSDKCONFIG_DEFAULTS=$captureDefaults")
+    }
+    # Keep generated artifacts outside a synced workspace when Windows holds
+    # its freshly created dependency files open. Source/config stay here.
+    if ($externalBuildRoot) {
+        $profileBuild = Join-Path $externalBuildRoot "build-$Profile"
+        if ($idfArguments[0] -eq '-B') { $idfArguments[1] = $profileBuild }
+        else { $idfArguments = @('-B', $profileBuild) + $idfArguments }
     }
     $fixtureOption = if ($FixtureCheck) { 'ON' } else { 'OFF' }
     $idfArguments += "-DCOMPANION_QUESTION_FIXTURE=$fixtureOption"

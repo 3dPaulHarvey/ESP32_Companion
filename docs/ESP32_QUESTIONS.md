@@ -1,6 +1,6 @@
 # First manual microphone question
 
-**Phase 4e passed on 2026-11-18.** A real microphone question received the correct spoken Gemini answer through COM26's speaker and returned to READY. The saved result verifies complete upload, output, closure and playback; the user confirms the correct spoken answer. COM26 runs the **question** profile with reviewed microphone settings. Wake-triggered cloud conversation is the next integration step.
+**Phase 4e passed on 2026-11-18.** A real microphone question received the correct spoken Gemini answer through COM26's speaker and returned to READY. The saved result verifies complete upload, output, closure and playback; the user confirms the correct spoken answer. That checkpoint used the **question** profile with reviewed microphone settings. The successor [wake profile](ESP32_WAKE.md) adds an explicitly armed physical wake; this manual tester still works as a reference.
 
 ## Repeat the manual test
 
@@ -24,7 +24,7 @@ Original session: ignored `logs/microphone-calibration/2026-11-18_12-20-12_18333
 
 ## Firmware ownership and limits
 
-Only explicit serial **q** can retain a question capture. The existing input task remains the sole microphone reader. It transfers the successful 128,000-byte allocation directly to the session task; the UI receives only metadata. Normal wake/calibration PCM is still wiped before metadata publication. Failed, cancelled, stale, rejected and pre-upload network-loss paths clear retained input.
+In the **question** profile, only explicit serial **q** can retain a question capture. The **wake** profile also allows one explicitly armed physical wake through the same path. The existing input task remains the sole microphone reader. It transfers the successful 128,000-byte allocation directly to the session task; the UI receives only metadata. Unarmed wake/calibration PCM is still wiped before metadata publication. Failed, cancelled, stale, rejected and pre-upload network-loss paths clear retained input.
 
 After the end cue, the session task obtains a fresh temporary token through the existing Worker, opens the verified constrained Gemini WebSocket, and sends **100 PCM frames of 640 samples / 40 ms**, followed by `audioStreamEnd`. Incoming messages and ping/close controls are processed during upload. Input and base64 workspaces are wiped; the input allocation is released immediately after EOF, or on any earlier failure. This uses the existing server-side activity detection and EOF signal. [Google's realtime input fields](https://googleapis.github.io/js-genai/release_docs/interfaces/types.LiveClientRealtimeInput.html).
 

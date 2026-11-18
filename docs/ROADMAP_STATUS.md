@@ -1,6 +1,6 @@
 # Companion roadmap progress
 
-Updated 2026-11-18. Current checkpoint: **Phase 4e passed: a real spoken microphone question received the correct audible Gemini answer and returned to READY**. The saved technical result and the user's physical confirmation agree. The original working robot and reference repository remain separate.
+Updated 2026-11-18. Current passed checkpoint: **Phase 5a: three consecutive armed physical wake/question/answer/READY cycles**, with correct clear answers confirmed by the user. Saved technical results verify each complete turn and zero input/output clipping. The original working robot and reference repository remain separate.
 
 | Roadmap phase | Status and evidence |
 |---|---|
@@ -13,8 +13,9 @@ Updated 2026-11-18. Current checkpoint: **Phase 4e passed: a real spoken microph
 | 4c: ESP32 speaker output | Passed: fixed text greeting -> bounded Gemini PCM -> existing speaker -> READY. [Current voice checkpoint](ESP32_VOICE.md) |
 | 4d: microphone preparation | Three quiet + three speech samples accepted; zero speech clipping at shift 14, 12.72 dB level contrast, four-second phrase fit confirmed. Capture shift 15 applied for additional headroom; wake remains 12. [Calibration](MICROPHONE_CALIBRATOR.md) |
 | 4e: manual microphone turn | Passed: real four-second capture → Gemini → correct spoken answer → READY. Exactly 128,000 input bytes sent and 91,200 reply samples played; input/output clipping zero. User confirms the answer. [Question results](ESP32_QUESTIONS.md) |
-| 5: wake and follow-up conversation | Pending: connect cloud audio to wake, follow-up listening, quiet timeout, re-wake, and repeated recovery checks. |
+| 5a: one armed wake/question/reply | Passed: three consecutive new physical wakes, exact input upload, complete reply/playback, normal close, READY and correct clear answers confirmed by the user. Self-paced tester autosaves results. [Wake results](ESP32_WAKE.md) |
+| 5b: follow-up conversation | Pending: follow-up listening, quiet timeout, re-wake, interruption and repeated recovery checks. |
 
-The next small gate is **one wake-triggered question and answer**: connect the existing Hi, E-S-P event to the verified question path and verify wake → listening → spoken answer → READY before adding follow-up conversation. The Desktop manual test remains a repeatable reference. COM26 currently uses capture shift 15 and a four-second window; normal wake and calibration still run locally until that next integration is implemented.
+The next small gate is **a follow-up question after the robot's answer**, followed by a quiet timeout to idle and a fresh wake. The current firmware still requires a separate arm for each cloud turn. Capture remains shift 15/four seconds; boot is offline/unarmed and ordinary wake remains local outside an armed trial. Both Desktop question testers remain repeatable references with saved evidence.
 
 The first finished companion milestone still requires **wake -> spoken question -> spoken answer -> follow-up -> answer -> idle -> wake again**. The complete manual microphone turn is now established. Extended uptime, live audio streaming, interruption handling and broader network-fault tests remain open.

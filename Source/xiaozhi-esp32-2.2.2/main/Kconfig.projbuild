@@ -60,6 +60,15 @@ config COMPANION_GEMINI_QUESTION_PROBE
         Add an explicit USB-started four-second microphone question, followed
         by a bounded Gemini audio reply. Wake and calibration remain local.
 
+config COMPANION_CLOUD_WAKE
+    bool "Companion explicitly armed wake question"
+    depends on COMPANION_GEMINI_QUESTION_PROBE
+    default n
+    help
+        Permit one wake-triggered microphone question after an explicit USB
+        arm command. Boot and ordinary wake remain local. Arming expires on
+        disconnect or timeout, and is consumed by one recognized wake.
+
 config OTA_URL
     string "Default OTA URL"
     default "https://api.tenclass.net/xiaozhi/ota/"

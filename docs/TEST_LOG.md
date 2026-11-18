@@ -605,4 +605,45 @@ The user reran the Desktop test and reported **“spoken question answered by co
 
 The successful run uses the installed normal firmware SHA256 `8ed2d6bb5fd6a75793573c7a6b1639f62b0bf4ef1715f0ecb2c20cb7b8c1c245`, with the synthetic fixture excluded. Evidence remains in ignored `logs/robot-question-tests/2026-11-18_14-00-56_4f328c47/session.json` and the reviewed numeric summary `logs/esp32-question-live-verified.json`. The original session was not edited. No firmware change or extra hardware test was needed to record this checkpoint.
 
-**Phase 4e passed: real microphone → Gemini → correct spoken answer → READY.** This establishes one complete manual turn at the calibrated input gain. The next small gate is a wake-triggered single turn, followed by separate repeated-cycle and follow-up conversation checks. Normal Hi, E-S-P behavior currently remains the local capture/cue routine.
+**Phase 4e passed: real microphone → Gemini → correct spoken answer → READY.** This establishes one complete manual turn at the calibrated input gain. The next small gate is a wake-triggered single turn, followed by separate repeated-cycle and follow-up conversation checks. Normal Hi, E-S-P behavior at that checkpoint remains the local capture/cue routine.
+
+## 2026-11-18 - Phase 5a armed wake checkpoint installed
+
+Added the opt-in **wake** profile and separate Desktop **Robot Wake Question Test**. Connecting verifies Gemini setup without sending microphone audio. Each explicit **Arm next wake** hands the idle calibration hold to one model-recognized Hi, E-S-P event. The arm is consumed before the shared question capture begins, using source `voice_question`; no follow-up turn is added. The established calibrated microphone, input allocation transfer, four-second capture/end cue, temporary session, complete bounded output, original speaker task and READY recovery remain shared with the verified manual path.
+
+An arm has a ten-second heartbeat lease and a hard one-minute waiting window. A late heartbeat cannot revive it. Duplicate arms do not restart deadlines; competing session requests are blocked while waiting. Explicit disarm, cancellation, calibration takeover and Wi-Fi loss clear waiting authorization. Reconnecting Wi-Fi does not rearm. Boot remains offline and unarmed. The manual question tester remains compatible; the separate calibrator stays local-only.
+
+The tester records the arm baseline, new physical wake count and correlated microphone cycle, and rejects mismatched/manual/duplicate trigger traces or incomplete upload/reply/playback. Its allowlist excludes q, f, n and provisioning. Each trial and its separate human audible-result confirmation autosave under `logs/robot-wake-tests/`; demo data is isolated. Stop/close while waiting or recording preserves the partial result. The Desktop shortcut and root launcher are installed, and the user has been prompted to run three independent trials when ready, with no timed chat coordination.
+
+| Verification | Result |
+|---|---|
+| Build and configuration | PASS: 116 compiled assertions; six new wake permission/deadline policies; CA/name/date checks, five transport units with logging compiled out, actual device credential absent, NVS excluded, fixture disabled |
+| Host/app regression | PASS: all 62 tests; new physical-cycle correlation, rejected/expired arms, no manual/provisioning writes, heartbeat ownership, pre-cancelled Start, complete reply, and actual Tk waiting/stop/retry/confirm/save/close workflow; prior manual and full calibrator UI tests pass |
+| Flash | PASS: guarded development MAC, verified write hashes, current app 2,583,152 bytes |
+| Boot/connection | PASS: offline/unarmed, offline arm rejected; real desktop adapter verifies configured board, capture shift 15 and Gemini setup/normal close |
+| Serial ownership | PASS: duplicate arm and competing setup rejected while waiting; disarm returns idle |
+| Deadlines | PASS on board: absent heartbeat expires in ten seconds; late heartbeat does not rearm; active heartbeats cannot extend the one-minute window |
+| Takeover/network | PASS: calibration control disarms; Wi-Fi stop disarms; offline arm rejected; reconnect leaves arm off |
+| Local recovery | PASS: ordinary local capture/cue after those transitions; exactly 64,000 samples at shift 15, elapsed 4.115 s, RMS 623, peak 2,469, zero clipping |
+| Unattended provider/input | PASS: one setup-only session request, zero question requests, no microphone audio uploaded; ambient local recovery sample is not a human speech calibration result |
+| Physical wake and correct answer | PENDING: three self-paced real trials, saved technical result and human confirmation required |
+
+Windows sharing locks interrupted generated-directory cleanup and Ninja dependency-file removal in the synced project build tree. Added optional `-BuildRoot` to put generated artifacts outside that tree; the complete build then passed at `%LOCALAPPDATA%/ESP32_Companion/build-wake`. The default build location remains unchanged. Disposable unit/UI fixtures now use separate system temporary directories to avoid the same cleanup locks; real user and demo result locations remain unchanged. No vendor asset-script change was retained.
+
+Current app SHA256: `239c8f5189878702d850c8ab57be1471ba423859a29de67f44983e5eb0939ee0`. Private pre-wake full-flash backup: `recovery/2026-11-18-phase-5a/before-wake-full-flash.bin`, 8,388,608 bytes, SHA256 `751c0b8e0de35279416d8c2043e3e397ef7f6446da5c781e99707725ef5a0373`; its OTA0 app was verified byte-for-byte against the preceding passed manual image. Eight write/configuration artifacts and their hash manifest are archived in `built-wake/` beside that backup. Earlier backups and verified images remain intact.
+
+Ignored evidence: `esp32-wake-preflash.json`, `esp32-wake-hardware-qa.json`, `esp32-wake-build-external.log`, `esp32-wake-flash.log`, `robot-wake-host-tests.log` under `logs/`. All ten unattended board checks pass. No Worker deployment, key, provider model, TLS, audio gain/window, wiring or dependency version changed. Physical testing was pending at installation; the following entry records its result. [Self-paced test](ESP32_WAKE.md).
+
+## 2026-11-18 - Phase 5a three real wake turns verified
+
+The user ran the new tester independently and reported **three successful cycles**. Reviewed the closed, non-demo session `2026-11-18_15-40-39_be9779c7`. It contains exactly three attempts, each `verified_by_user` with `human_confirmed=true`. Source SHA256 `da4183efbf230c4360ad9b64b908d403cdd47d66bc53211ec7541c8034232b36`. The original JSON remains unchanged; reviewed numeric summary is `logs/esp32-wake-live-verified.json`.
+
+| Trial | New wake / baseline | Cycle / capture request | Input RMS / peak / clipped | Reply samples / duration | Playback including settling | Session job |
+|---|---|---|---|---|---|---|
+| 1 | 2 / 1 | 3 | 973 / 6,006 / 0 | 103,440 / 4.310 s | 4.471 s | 18.377 s |
+| 2 | 3 / 2 | 4 | 924 / 5,672 / 0 | 53,040 / 2.210 s | 2.378 s | 14.305 s |
+| 3 | 4 / 3 | 5 | 844 / 6,003 / 0 | 91,921 / 3.830 s | 4.007 s | 17.256 s |
+
+All three model triggers exceeded their arm baseline and matched their microphone capture cycle. Each capture was exactly 64,000 samples / 128,000 bytes / four seconds at shift 15, with complete 100-frame upload, EOF and input clearing. HTTP 200, WebSocket 101, setup, completed turn, close sent/acknowledged and close code 1000 pass for each reply. Every output sample was played; output clipping is zero in all three. The client's SPEAKING/READY gates passed and the user confirmed correct clear spoken answers after each turn. Connect's setup-only preflight also passed. Session closed at 23:42:16 UTC / 15:42:16 PST, with no recording or transcript saved.
+
+**Phase 5a passed: three separate armed physical wakes -> microphone questions -> correct spoken answers -> READY.** The installed image is unchanged from the verified wake build above. The next baby step is bounded follow-up listening after an answer, then quiet timeout and a fresh wake. The current mode remains one cloud turn per explicit arm.
