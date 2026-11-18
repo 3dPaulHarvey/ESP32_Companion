@@ -2,6 +2,7 @@
 /recovery/
 /logs/
 /.tools/
+/.wrangler/
 **/__pycache__/
 *.pyc
 .env
