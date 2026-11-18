@@ -587,3 +587,22 @@ Added a developer-only `-FixtureCheck` path and verified synthetic-fixture prepa
 Private evidence: `esp32-question-original-session-reproduction.json`, `esp32-question-session-response-shape.json`, `esp32-question-clock-fix-hardware.json`, `robot-question-message-shape.json`, `esp32-question-fixture-input-transcription-failure.json`, `esp32-question-fixture-hardware.json`, `esp32-question-session-parser-fix-preflash.json`, `esp32-question-session-parser-fix-build-full.log`, `esp32-question-session-parser-fix-flash.log`, `robot-question-final-app-preflight.json` and host-test logs under ignored `logs/`. No actual user audio/transcript was saved. User-directed audio attempts remain separate from autonomous session, fixed-greeting and synthetic-input probes.
 
 The normal rebuild had one incomplete CMake error under PowerShell stream redirection; rerunning with full process output completed cleanly. The passing diagnostic image is archived as `built-question-fixture-qa/`, and the final normal image as `built-question-session-parser-fix/`, under the existing private `recovery/2026-11-18-phase-4e/` directory. Earlier images and the verified pre-question full-flash backup remain intact. Worker deployment, keys, microphone gain/window, wiring and dependency versions are unchanged by these fixes.
+
+## 2026-11-18 — Phase 4e live microphone turn verified
+
+The user reran the Desktop test and reported **“spoken question answered by correct spoken result.”** Reviewed the closed, non-demo session `2026-11-18_14-00-56_4f328c47`; its single attempt is `verified_by_user` with `human_confirmed=true`. The saved cloud preflight also passed. Source JSON SHA256: `c8c16a37c32a05048280d953dfdcf6b0e3c26e19a8ba5876583f12fc248cb0c5`.
+
+| Live check | Observed result |
+|---|---|
+| Microphone | 64,000 samples / 128,000 bytes / four seconds at shift 15; elapsed capture/discard 4.119 s |
+| Input level | RMS 1,119; peak 9,035; zero clipped and near-full-scale raw samples |
+| Upload | Exactly 128,000 bytes in 100 frames; EOF sent; input cleared |
+| Session/turn | HTTP 200, upgrade 101, setup and turn complete, normal close 1000 |
+| Output | 182,400 bytes / exactly 91,200 samples played / 3.800 s; zero clipped samples |
+| Playback/settling | 3.965 s; complete session/network/playback job 17.106 s |
+| Recovery/physical | Client READY/wake gate passed; user selected clear/correct result and confirmed the correct spoken answer in chat |
+| Saved data | Measurements and confirmation only; no audio recording or transcript; app closed at 22:01:39 UTC / 14:01:39 PST |
+
+The successful run uses the installed normal firmware SHA256 `8ed2d6bb5fd6a75793573c7a6b1639f62b0bf4ef1715f0ecb2c20cb7b8c1c245`, with the synthetic fixture excluded. Evidence remains in ignored `logs/robot-question-tests/2026-11-18_14-00-56_4f328c47/session.json` and the reviewed numeric summary `logs/esp32-question-live-verified.json`. The original session was not edited. No firmware change or extra hardware test was needed to record this checkpoint.
+
+**Phase 4e passed: real microphone → Gemini → correct spoken answer → READY.** This establishes one complete manual turn at the calibrated input gain. The next small gate is a wake-triggered single turn, followed by separate repeated-cycle and follow-up conversation checks. Normal Hi, E-S-P behavior currently remains the local capture/cue routine.

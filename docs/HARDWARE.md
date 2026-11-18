@@ -13,7 +13,7 @@ Last updated: 2026-11-18. Development device: **COM26**, MAC **44:bd:8d:ec:38:e0
 - Phase 4b's `gemini` profile verifies six consecutive direct Gemini setup/close cycles, concurrent local capture and offline recovery. The user confirms eyes/wake/listening/cue after flashing. Lowest observed internal free watermark across those short runs was 53,743 bytes. [Setup profile/results](ESP32_GEMINI_SETUP.md).
 - Phase 4c's `voice` profile receives a fixed Gemini greeting and plays 24 kHz PCM through the original I2S speaker task, then restores READY/wake. The user confirms clear speech at normal speed and speaking/READY behavior. Repeated playback, busy guards, device-side Wi-Fi loss and offline recovery pass. [Speaker profile/results](ESP32_VOICE.md).
 - Phase 4d's calibrator supplied three accepted quiet and three speech samples, with zero clipping at shift 14 and 12.72 dB level contrast. Capture shift 15 was applied for extra headroom; wake stays at 12. [Calibration procedure/results](MICROPHONE_CALIBRATOR.md).
-- Phase 4e's current `question` profile adds explicit USB-started microphone upload and bounded Gemini playback. Local guards/cancellation/recovery and host-app tests pass; the actual spoken-question answer awaits the user. Normal wake/calibration stay local and Wi-Fi is off at boot. [Run the question test](ESP32_QUESTIONS.md).
+- Phase 4e's current `question` profile passes a real microphone question and correct audible Gemini answer, confirmed by the user. The saved result verifies four-second capture, complete upload, exact 3.8-second reply playback, zero input/output clipping and READY recovery. Normal wake/calibration stay local and Wi-Fi is off at boot. [Question results and repeat procedure](ESP32_QUESTIONS.md).
 
 ## Wiring to preserve
 
@@ -108,7 +108,7 @@ Record evidence and firmware/build identity in [`TEST_LOG.md`](TEST_LOG.md). Unc
 - [x] OLED initializes at 0x3C; user confirms idle/listening/speaking expressions work.
 - [x] Microphone 16 kHz PCM sample count/RMS/peak/clipping measured during quiet, voice and tap test; wake works from 1–2 feet.
 - [x] Review three quiet and three normal-speech captures; apply extra capture headroom while preserving wake gain.
-- [ ] Verify one intelligible microphone question and a correct audible Gemini answer at the applied gain.
+- [x] Verify one intelligible microphone question and a correct audible Gemini answer at the applied gain.
 - [x] User confirms low-volume generated tones and local acknowledgment sample work.
 - [x] Wi-Fi connects, obtains IP and recovers after a device-side disconnect.
 - [ ] Physical access-point disable/re-enable test (skipped by user).
