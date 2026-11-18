@@ -1,6 +1,6 @@
 # Self-paced robot microphone check
 
-Phase 4d, 2026-11-18: the standalone Windows calibrator and its COM26 firmware are ready. **User-run quiet/speech calibration is pending.** Automated integration data and demo data do not count as human calibration.
+Phase 4d, 2026-11-18: **the user's three quiet and three speech captures were completed, reviewed, and incorporated into configuration.** Speech had zero clipping at shift 14 and 12.72 dB level contrast; the four-second phrase fit was confirmed. Capture shift 15 is now applied for additional headroom, with wake unchanged at 12. The optional wake check was skipped. [Results and next spoken-question test](ESP32_QUESTIONS.md). The calibrator remains available for later adjustments; automated/demo data never counts as human calibration.
 
 We are checking whether normal speech clips, how far speech levels rise above room noise, and whether a four-second listening window fits a short question. Earlier two-second tests were difficult to coordinate; the user missed some windows, so those attempts cannot establish normal-speech headroom. This step sends no microphone audio to Gemini.
 
@@ -49,7 +49,7 @@ The report compares median quiet-window RMS with each speech capture's strongest
 
 ## Firmware and developer verification
 
-The separate **microphone** profile uses 64,000 samples / 128,000 bytes / 4,000 ms at 16 kHz mono. It reads 32-bit I2S words and uses a provisional right shift of **14** for question capture, providing four times the numeric headroom of the prior shift 12. **Wake recognition keeps its proven shift 12.** Warm-up discard remains 3,200 samples; worker/controller deadlines are 5.5/6 seconds. Earlier profiles retain their two-second capture and original conversion.
+The separate **microphone** profile uses 64,000 samples / 128,000 bytes / 4,000 ms at 16 kHz mono. It reads 32-bit I2S words and now uses right shift **15**, selected after the user's shift-14 calibration. **Wake recognition keeps its proven shift 12.** Warm-up discard remains 3,200 samples; worker/controller deadlines are 5.5/6 seconds. Earlier profiles retain their two-second capture and original conversion. COM26's current **question** profile also supports this local calibrator; the calibrator cannot issue its separate upload command.
 
 ```powershell
 .\tools\idf.ps1 -Action build -Profile microphone
@@ -62,4 +62,4 @@ The flash wrapper verifies the development MAC. Calibrator USB commands are limi
 
 Hardware integration passed recording events, exact counts/window summaries, heartbeat ownership beyond ten seconds, mid-capture cancellation, normal release, and abrupt-disconnect lease recovery with Wi-Fi off. The Tk event-loop check covers explicit starts, review/redo, six kept demo samples, optional skip, layout bounds and close during capture. Windows visual inspection could not run because the Computer Use native pipe was unavailable; the app was not visually certified through that tool. See [TEST_LOG.md](TEST_LOG.md) for build and recovery identities.
 
-After the user runs this app, review the saved measurements, adjust capture headroom only if the data warrants it, and then proceed to one manual microphone question and Gemini reply. [Roadmap status](ROADMAP_STATUS.md).
+The saved measurements have been reviewed and capture headroom applied. Next run one [manual microphone question and Gemini reply](ESP32_QUESTIONS.md). [Roadmap status](ROADMAP_STATUS.md).

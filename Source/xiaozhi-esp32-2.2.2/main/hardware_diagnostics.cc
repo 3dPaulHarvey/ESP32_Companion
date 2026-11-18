@@ -200,6 +200,10 @@ const char* WifiEventName(WifiEvent event) {
     bool wake_armed = true;
     MicrophoneCalibrationLease calibration_lease;
     bool manual_voice_active = false;
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+    bool question_capture = false;
+    bool manual_question_active = false;
+#endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
     bool manual_voice_speaking = false;
 #endif
@@ -231,7 +235,11 @@ const char* WifiEventName(WifiEvent event) {
             case LocalCompanionState::Listening:
                 SetFace(display, FaceState::Listening, "listening/pcm-capture");
                 capture_request_id = cycle.started();
-                capture_request_pending = audio.BeginLocalCapture(capture_request_id);
+                capture_request_pending = audio.BeginLocalCapture(capture_request_id
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+                    , question_capture
+#endif
+                );
                 capture_start_failed = !capture_request_pending;
                 if (capture_request_pending) {
                     ESP_LOGI("LocalCompanion", "CAPTURE_BEGIN request=%lu target_samples=%u bytes=%u sample_rate=16000 warmup_samples=3200",
@@ -248,6 +256,20 @@ const char* WifiEventName(WifiEvent event) {
             case LocalCompanionState::Idle:
                 SetFace(display, FaceState::Idle, "idle/blink");
                 if (capture_request_pending) { audio.CancelLocalCapture(capture_request_id); }
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+                if (question_capture) {
+                    question_capture = false;
+                    CompanionSessionProbe::SetQuestionCaptureGuard(false);
+                    if (cycle.completed() != completed_reported && CompanionSessionProbe::RequestQuestion(capture_request_id)) {
+                        manual_voice_active = true; manual_question_active = true; manual_voice_speaking = false;
+                        SetFace(display, FaceState::Idle, "connecting/Gemini-question", "CONNECTING");
+                        ESP_LOGI("CompanionQuestion", "UI state=CONNECTING wake_armed=0");
+                    } else {
+                        audio.DiscardQuestionAudio(capture_request_id);
+                        ESP_LOGI("CompanionQuestion", "CAPTURE_DISCARDED request=%lu input_cleared=1", static_cast<unsigned long>(capture_request_id));
+                    }
+                }
+#endif
                 if (cycle.completed() != completed_reported) {
                     completed_reported = cycle.completed();
                     ESP_LOGI("LocalCompanion", "CYCLE_COMPLETE cycle=%lu completed=%lu source=%s voice_started=%lu serial_started=%lu aborted=%lu",
@@ -299,6 +321,9 @@ const char* WifiEventName(WifiEvent event) {
                 manual_voice_speaking = true;
                 SetFace(display, FaceState::Speaking, "speaking/Gemini-greeting", "SPEAKING");
                 ESP_LOGI("CompanionVoice", "UI state=SPEAKING wake_armed=0");
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+                if (manual_question_active) ESP_LOGI("CompanionQuestion", "UI state=SPEAKING wake_armed=0");
+#endif
             }
             if (stage == CompanionSessionProbe::VoiceStage::Finished && !audio.IsDiagnosticPcmBusy()) {
                 manual_voice_active = false; manual_voice_speaking = false;
@@ -306,13 +331,17 @@ const char* WifiEventName(WifiEvent event) {
                 SetFace(display, FaceState::Idle, "idle/blink");
                 arm_wake();
                 ESP_LOGI("CompanionVoice", "UI state=READY wake_armed=1");
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+                if (manual_question_active) ESP_LOGI("CompanionQuestion", "UI state=READY wake_armed=1");
+                manual_question_active = false;
+#endif
             }
         }
 #endif
         LocalPcmCaptureResult capture_result;
         if (audio.PollLocalCaptureResult(capture_result)) {
             if (capture_request_pending && capture_result.request_id == capture_request_id) {
-                capture_request_pending = false;  // Worker has wiped/freed its buffer before publication.
+                capture_request_pending = false;  // Worker cleanup or explicit question handoff is acknowledged.
             }
             if (cycle.state() == LocalCompanionState::Listening && capture_result.request_id == cycle.started()) {
                 const auto previous_capture_state = cycle.state();
@@ -347,6 +376,9 @@ const char* WifiEventName(WifiEvent event) {
                     if (cycle.Abort()) { on_transition(previous_capture_state); }
                 }
             } else {
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+                audio.DiscardQuestionAudio(capture_result.request_id);
+#endif
                 ESP_LOGW("LocalCompanion", "CAPTURE_RESULT_DISCARDED request=%lu state=%s status=%s",
                     static_cast<unsigned long>(capture_result.request_id), LocalCompanionCycle::StateName(cycle.state()),
                     LocalPcmCaptureStatusName(capture_result.status));
@@ -388,6 +420,21 @@ const char* WifiEventName(WifiEvent event) {
             }
 #endif
             switch (command) {
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+                case 'q':
+                    if (manual_voice_active || question_capture || calibration_lease.held() || capture_request_pending ||
+                        cycle.state() != LocalCompanionState::Idle || CompanionSessionProbe::IsBusy() || !audio.IsIdle()) {
+                        ESP_LOGW("CompanionQuestion", "REQUEST_REJECTED reason=local_busy");
+                    } else if (!wifi.IsConnected()) {
+                        ESP_LOGW("CompanionQuestion", "REQUEST_REJECTED reason=wifi_required");
+                    } else {
+                        question_capture = true;
+                        CompanionSessionProbe::SetQuestionCaptureGuard(true);
+                        ESP_LOGI("CompanionQuestion", "CAPTURE_REQUESTED explicit_start=1 samples=64000");
+                        begin_cycle(now, "question");
+                    }
+                    break;
+#endif
 #if CONFIG_COMPANION_MICROPHONE_PREP
                 case '[':
                     if (cycle.state() == LocalCompanionState::Idle && !capture_request_pending && !manual_voice_active && !CompanionSessionProbe::IsBusy()) {
@@ -423,6 +470,19 @@ const char* WifiEventName(WifiEvent event) {
                 case 'h': PrintHelp(); break;
                 case 'n': begin_cycle(now, "serial"); break;
                 case 'x':
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+                    if (manual_question_active) {
+                        CompanionSessionProbe::CancelQuestion();
+                        ESP_LOGI("CompanionQuestion", "CANCEL_REQUESTED cleanup_pending=1");
+                        break;
+                    }
+                    if (question_capture && (cycle.state() == LocalCompanionState::WakeDetected || cycle.state() == LocalCompanionState::Speaking)) {
+                        abort_reason = "cancelled";
+                        const auto cancelled_state = cycle.state();
+                        if (cycle.Abort()) on_transition(cancelled_state);
+                        break;
+                    }
+#endif
                     if (cycle.state() == LocalCompanionState::Listening && capture_request_pending) {
                         audio.CancelLocalCapture(capture_request_id);
                         ESP_LOGI("LocalCompanion", "CAPTURE_CANCEL_REQUEST request=%lu", static_cast<unsigned long>(capture_request_id));

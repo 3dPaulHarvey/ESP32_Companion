@@ -26,6 +26,9 @@
 #if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
 #include "local_pcm_capture.h"
 #endif
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+#include "companion/question_audio.h"
+#endif
 
 
 /*
@@ -144,9 +147,13 @@ public:
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);
 #if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
-    bool BeginLocalCapture(uint32_t request_id);
+    bool BeginLocalCapture(uint32_t request_id, bool retain_question = false);
     bool PollLocalCaptureResult(LocalPcmCaptureResult& result);
     void CancelLocalCapture(uint32_t request_id);
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+    std::unique_ptr<companion_question::Pcm> TakeQuestionAudio(uint32_t request_id);
+    void DiscardQuestionAudio(uint32_t request_id);
+#endif
 #endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
     bool PlayDiagnosticPcm(const int16_t* pcm, size_t samples, uint32_t& played);
@@ -207,8 +214,8 @@ private:
     bool service_stopped_ = true;
     bool audio_input_need_warmup_ = false;
 #if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
-    // The input task owns all PCM memory. These fields transfer only request,
-    // cancellation and completed metadata between that task and the UI task.
+    // The UI exchanges only metadata. An explicit question may transfer its
+    // bounded PCM directly from the input task to the session task.
     std::mutex local_capture_mutex_;
     uint32_t local_capture_request_id_ = 0;
     uint32_t local_capture_generation_ = 0;
@@ -216,6 +223,10 @@ private:
     bool local_capture_cancel_requested_ = false;
     bool local_capture_result_ready_ = false;
     LocalPcmCaptureResult local_capture_result_;
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+    bool local_capture_retain_question_ = false;
+    std::unique_ptr<companion_question::Pcm> question_audio_;
+#endif
     void RunLocalCapture();
 #endif
 

@@ -2,7 +2,7 @@ param(
     [ValidateSet('build', 'flash', 'monitor', 'reconfigure', 'merge-bin')]
     [string]$Action = 'build',
     [string]$Port = 'COM26',
-    [ValidateSet('baseline', 'diagnostics', 'session', 'gemini', 'voice', 'microphone')]
+    [ValidateSet('baseline', 'diagnostics', 'session', 'gemini', 'voice', 'microphone', 'question')]
     [string]$Profile = 'baseline'
 )
 
@@ -14,7 +14,7 @@ if (-not (Test-Path -LiteralPath $activation)) {
     throw "ESP-IDF v5.5.2 activation script missing: $activation"
 }
 . $activation
-if ($Profile -in @('session', 'gemini', 'voice', 'microphone') -and $Action -eq 'flash') {
+if ($Profile -in @('session', 'gemini', 'voice', 'microphone', 'question') -and $Action -eq 'flash') {
     if ($Port -ne 'COM26') { throw 'Cloud diagnostic profiles may be flashed only to the development board on COM26.' }
     $identityOutput = & "$env:IDF_PYTHON_ENV_PATH\Scripts\python.exe" -m esptool --chip esp32s3 --port $Port read_mac 2>&1
     if ($LASTEXITCODE -ne 0 -or ($identityOutput -join "`n") -notmatch '(?i)MAC: 44:bd:8d:ec:38:e0') {
@@ -41,10 +41,11 @@ try {
         $idfArguments = @('-B', 'build-voice', '-DIDF_TARGET=esp32s3',
             '-DSDKCONFIG=sdkconfig.voice.generated',
             '-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.baseline;config/diagnostics.defaults;config/session.defaults;config/gemini.defaults;config/voice.defaults')
-    } elseif ($Profile -eq 'microphone') {
-        $idfArguments = @('-B', 'build-microphone', '-DIDF_TARGET=esp32s3',
-            '-DSDKCONFIG=sdkconfig.microphone.generated',
-            '-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.baseline;config/diagnostics.defaults;config/session.defaults;config/gemini.defaults;config/voice.defaults;config/microphone.defaults')
+    } elseif ($Profile -in @('microphone', 'question')) {
+        $captureDefaults = 'sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.baseline;config/diagnostics.defaults;config/session.defaults;config/gemini.defaults;config/voice.defaults;config/microphone.defaults'
+        if ($Profile -eq 'question') { $captureDefaults += ';config/question.defaults' }
+        $idfArguments = @('-B', "build-$Profile", '-DIDF_TARGET=esp32s3',
+            "-DSDKCONFIG=sdkconfig.$Profile.generated", "-DSDKCONFIG_DEFAULTS=$captureDefaults")
     }
     if ($Action -in @('flash', 'monitor')) {
         $idfArguments += @('-p', $Port)

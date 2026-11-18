@@ -14,7 +14,7 @@ from microphone_calibration_robot import RobotClient, DemoRobot, TrialCancelled,
 
 
 class Worker(threading.Thread):
-    def __init__(self, events, *, demo=False):
+    def __init__(self, events, *, demo=False, client_factory=None):
         super().__init__(daemon=True)
         self.events = events
         self.commands = queue.Queue()
@@ -22,6 +22,7 @@ class Worker(threading.Thread):
         self.closing = threading.Event()
         self.client = None
         self.demo = demo
+        self.client_factory = client_factory
 
     def emit(self, name, data=None):
         self.events.put((name, data or {}, time.monotonic()))
@@ -39,7 +40,8 @@ class Worker(threading.Thread):
                         if self.client:
                             try: self.client.close()
                             except Exception: pass
-                        self.client = (DemoRobot if self.demo else RobotClient)(self.emit, self.cancel, self.closing)
+                        factory = self.client_factory or (DemoRobot if self.demo else RobotClient)
+                        self.client = factory(self.emit, self.cancel, self.closing)
                         self.emit("connected", self.client.connect())
                     elif command == "capture" and self.client:
                         self.emit("result", self.client.capture(data["kind"]))

@@ -6,7 +6,7 @@ This is the speaker checkpoint within Phase 4. The robot's microphone has not be
 
 ## Current behavior
 
-The **voice** profile verified here uses **Hi, E-S-P -> LISTENING -> two-second local capture -> CUE -> READY**, with Wi-Fi off at boot. On 2026-11-18 COM26 advanced to the [microphone profile and self-paced calibrator](MICROPHONE_CALIBRATOR.md), extending only question capture to four seconds and adding provisional capture headroom. The manual greeting below remains available outside calibration.
+The **voice** profile verified here uses **Hi, E-S-P -> LISTENING -> two-second local capture -> CUE -> READY**, with Wi-Fi off at boot. On 2026-11-18 COM26 advanced through [microphone calibration](MICROPHONE_CALIBRATOR.md) to the [manual question profile](ESP32_QUESTIONS.md), with four-second capture and reviewed headroom. The manual greeting below remains available outside calibration/question jobs.
 
 For one cloud greeting, use USB serial:
 

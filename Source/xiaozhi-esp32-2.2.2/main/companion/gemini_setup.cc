@@ -3,6 +3,10 @@
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
 #include "gemini_voice.h"
 #endif
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+#include "question_audio.h"
+#include "session_probe.h"
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -58,8 +62,12 @@ int Send(esp_transport_handle_t ws, unsigned opcode, char* data, std::size_t siz
         data, static_cast<int>(size), timeout_ms);
 }
 
-CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary, CompanionGeminiVoice::Reply* reply = nullptr) {
+CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary, CompanionGeminiVoice::Reply* reply = nullptr,
+        [[maybe_unused]] companion_question::Pcm* input = nullptr) {
     CompanionGeminiSetup::Result result;
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+    if (input && CompanionSessionProbe::QuestionCancelled()) { result.reason = "cancelled"; return result; }
+#endif
     std::size_t message_limit = companion_gemini::kMessageLimit;
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
     if (reply) {
@@ -89,7 +97,7 @@ CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary, Compan
     if (esp_transport_ws_set_config(transport.ws, &config) != ESP_OK) {
         result.reason = "websocket_config_failed"; return result;
     }
-    ESP_LOGI(kTag, "CONNECT_BEGIN no_question=%d no_audio_upload=1", reply ? 0 : 1);
+    ESP_LOGI(kTag, "CONNECT_BEGIN no_question=%d no_audio_upload=%d", reply ? 0 : 1, input ? 0 : 1);
     const int connected = esp_transport_connect(transport.ws, kHost, 443, kTransportTimeoutMs);
     result.upgrade_http = esp_transport_ws_get_upgrade_request_status(transport.ws);
     // The transport reports redirect statuses as positive connect results.
@@ -106,8 +114,52 @@ CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary, Compan
     std::size_t response_bytes = 0;
     unsigned response_messages = 0;
     auto deadline_us = esp_timer_get_time() + 20000000;
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+    PrivateBuffer upload(input ? companion_question::kFrameCapacity : 1);
+    if (!upload.data) { result.reason = "allocation_failed"; return result; }
+    std::size_t sent_samples = 0;
+    std::int64_t next_audio_us = 0;
+#endif
+    auto close_normal = [&]() {
+        char payload[] = {0x03, static_cast<char>(0xe8)};
+        if (Send(transport.ws, 8, payload, sizeof(payload), 1000) != sizeof(payload)) return false;
+        result.close_sent = true;
+        deadline_us = esp_timer_get_time() + (reply ? 5000000 : 2000000);
+        return true;
+    };
     while (esp_timer_get_time() < deadline_us) {
-        const int timeout_ms = static_cast<int>(std::min<int64_t>(1000, (deadline_us - esp_timer_get_time()) / 1000));
+        int timeout_ms = static_cast<int>(std::min<int64_t>(1000, (deadline_us - esp_timer_get_time()) / 1000));
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+        if (input && CompanionSessionProbe::QuestionCancelled()) { result.reason = "cancelled"; return result; }
+        if (input && result.setup_ack && !result.input_ended && esp_timer_get_time() >= next_audio_us) {
+            if (sent_samples < companion_question::kSamples) {
+                const auto count = std::min(companion_question::kChunkSamples, companion_question::kSamples - sent_samples);
+                const auto size = companion_question::EncodeFrame(input->data() + sent_samples, count, upload.data, upload.capacity);
+                if (!size || Send(transport.ws, 1, upload.data, size, 1000) != static_cast<int>(size)) {
+                    result.reason = "audio_send_failed"; return result;
+                }
+                sent_samples += count; result.input_bytes += count * 2; ++result.input_chunks;
+                mbedtls_platform_zeroize(upload.data, upload.capacity);
+                next_audio_us = esp_timer_get_time() + companion_question::kChunkMs * 1000;
+            } else {
+                char end[sizeof(companion_question::kEnd)];
+                std::memcpy(end, companion_question::kEnd, sizeof(end));
+                const int sent = Send(transport.ws, 1, end, sizeof(end) - 1, 1000);
+                mbedtls_platform_zeroize(end, sizeof(end));
+                input->Clear();
+                if (sent != sizeof(end) - 1) { result.reason = "audio_end_failed"; return result; }
+                result.input_ended = true; result.prompt_sent = true;
+                ESP_LOGI("CompanionQuestion", "AUDIO_SENT bytes=%u chunks=%u stream_ended=1 input_cleared=1", result.input_bytes, result.input_chunks);
+                deadline_us = esp_timer_get_time() + 30000000;
+                if (reply->state.turn_complete) {
+                    if (!close_normal()) { result.reason = "close_send_failed"; return result; }
+                }
+            }
+        }
+        if (input && result.setup_ack && !result.input_ended && !frames.active()) {
+            timeout_ms = static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(timeout_ms, (next_audio_us - esp_timer_get_time()) / 1000)));
+        }
+#endif
         if (timeout_ms <= 0) break;
         const int count = esp_transport_read(transport.ws, scratch.data, sizeof(scratch.data), timeout_ms);
         if (count < 0) { result.reason = "websocket_read_failed"; return result; }
@@ -178,6 +230,13 @@ CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary, Compan
                 frames.ResetMessage();
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
                 if (reply) {
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+                    if (input) {
+                        next_audio_us = esp_timer_get_time();
+                        deadline_us = next_audio_us + 12000000;
+                        continue;
+                    }
+#endif
                     char prompt[sizeof(companion_voice::kGreeting)];
                     std::memcpy(prompt, companion_voice::kGreeting, sizeof(prompt));
                     if (Send(transport.ws, 1, prompt, sizeof(prompt) - 1, 3000) != sizeof(prompt) - 1) {
@@ -196,18 +255,18 @@ CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary, Compan
                 }
                 frames.ResetMessage();
                 if (!reply->state.turn_complete) continue;
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+                if (input && !result.input_ended) continue;
+#endif
                 ESP_LOGI("CompanionVoice", "TURN_COMPLETE audio_bytes=%u chunks=%u sample_rate=24000",
                     static_cast<unsigned>(reply->state.bytes), reply->state.chunks);
 #else
                 result.reason = "unexpected_setup_response"; return result;
 #endif
             }
-            char close_payload[] = {0x03, static_cast<char>(0xe8)};
-            if (Send(transport.ws, 8, close_payload, sizeof(close_payload), 1000) != sizeof(close_payload)) {
+            if (!close_normal()) {
                 result.reason = "close_send_failed"; return result;
             }
-            result.close_sent = true;
-            deadline_us = esp_timer_get_time() + (reply ? 5000000 : 2000000);
         }
     }
     result.reason = result.close_sent ? "close_timeout" : result.prompt_sent ? "turn_timeout" : "setup_timeout";
@@ -232,6 +291,15 @@ Result Verify(std::string_view temporary) {
 Result ReceiveGreeting(std::string_view temporary, CompanionGeminiVoice::Reply& reply) {
     const auto started = esp_timer_get_time();
     auto result = VerifyConnection(temporary, &reply);
+    result.elapsed_ms = static_cast<uint32_t>((esp_timer_get_time() - started) / 1000);
+    return result;
+}
+#endif
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+Result ReceiveQuestion(std::string_view temporary, CompanionGeminiVoice::Reply& reply, companion_question::Pcm& input) {
+    const auto started = esp_timer_get_time();
+    auto result = VerifyConnection(temporary, &reply, &input);
+    input.Clear();  // Every connect/setup/send/read/cancel exit releases the question.
     result.elapsed_ms = static_cast<uint32_t>((esp_timer_get_time() - started) / 1000);
     return result;
 }

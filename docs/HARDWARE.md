@@ -12,7 +12,8 @@ Last updated: 2026-11-18. Development device: **COM26**, MAC **44:bd:8d:ec:38:e0
 - Phase 4a's session profile passes private NVS device-credential provisioning, certificate-verified HTTPS 401/200 checks, credential persistence, and a local capture/cue cycle during a successful request. [Session profile/results](ESP32_SESSIONS.md).
 - Phase 4b's `gemini` profile verifies six consecutive direct Gemini setup/close cycles, concurrent local capture and offline recovery. The user confirms eyes/wake/listening/cue after flashing. Lowest observed internal free watermark across those short runs was 53,743 bytes. [Setup profile/results](ESP32_GEMINI_SETUP.md).
 - Phase 4c's `voice` profile receives a fixed Gemini greeting and plays 24 kHz PCM through the original I2S speaker task, then restores READY/wake. The user confirms clear speech at normal speed and speaking/READY behavior. Repeated playback, busy guards, device-side Wi-Fi loss and offline recovery pass. [Speaker profile/results](ESP32_VOICE.md).
-- Phase 4d's current `microphone` profile adds four-second local capture and an autosaving Windows calibrator. Exact counts, cancellation and control-lease recovery pass automated checks; user quiet/speech calibration is pending. Wi-Fi remains off at boot and no microphone input is uploaded. [Open and run the calibrator](MICROPHONE_CALIBRATOR.md).
+- Phase 4d's calibrator supplied three accepted quiet and three speech samples, with zero clipping at shift 14 and 12.72 dB level contrast. Capture shift 15 was applied for extra headroom; wake stays at 12. [Calibration procedure/results](MICROPHONE_CALIBRATOR.md).
+- Phase 4e's current `question` profile adds explicit USB-started microphone upload and bounded Gemini playback. Local guards/cancellation/recovery and host-app tests pass; the actual spoken-question answer awaits the user. Normal wake/calibration stay local and Wi-Fi is off at boot. [Run the question test](ESP32_QUESTIONS.md).
 
 ## Wiring to preserve
 
@@ -51,7 +52,7 @@ Other definitions: onboard LED GPIO21; BOOT GPIO0; volume-up GPIO3; volume-down 
 | Installed toolchain | ESP-IDF v5.5.2 at `C:/esp/v5.5.2/esp-idf` |
 | Installed VS Code extension | ESP-IDF 2.3.0 |
 
-The I2S driver uses 32-bit slots. Normal/wake input converts microphone words to signed 16-bit PCM with a right shift of 12 and clipping; speaker PCM is scaled into 32-bit output. The new microphone profile alone reads raw words for local question capture, using provisional shift 14 and measuring headroom before clipping. Wake conversion stays unchanged. Although the board header defines `AUDIO_INPUT_REFERENCE`, the selected codec has one input channel and no reference channel; device AEC is not established by that define.
+The I2S driver uses 32-bit slots. Normal/wake input converts microphone words to signed 16-bit PCM with a right shift of 12 and clipping; speaker PCM is scaled into 32-bit output. Microphone/question profiles read raw words for bounded capture, using reviewed shift 15 and measuring headroom before clipping. Wake conversion stays unchanged. Although the board header defines `AUDIO_INPUT_REFERENCE`, the selected codec has one input channel and no reference channel; device AEC is not established by that define.
 
 Source inconsistencies found during inspection:
 
@@ -106,7 +107,8 @@ Record evidence and firmware/build identity in [`TEST_LOG.md`](TEST_LOG.md). Unc
 - [x] User confirms wake response to “Hi, E-S-P”; microphone path works for recognition.
 - [x] OLED initializes at 0x3C; user confirms idle/listening/speaking expressions work.
 - [x] Microphone 16 kHz PCM sample count/RMS/peak/clipping measured during quiet, voice and tap test; wake works from 1–2 feet.
-- [ ] Calibrate microphone input headroom before streaming; higher-level input can clip with the original conversion.
+- [x] Review three quiet and three normal-speech captures; apply extra capture headroom while preserving wake gain.
+- [ ] Verify one intelligible microphone question and a correct audible Gemini answer at the applied gain.
 - [x] User confirms low-volume generated tones and local acknowledgment sample work.
 - [x] Wi-Fi connects, obtains IP and recovers after a device-side disconnect.
 - [ ] Physical access-point disable/re-enable test (skipped by user).

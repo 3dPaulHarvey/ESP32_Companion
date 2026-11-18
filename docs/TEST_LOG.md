@@ -520,3 +520,40 @@ The first app integration test exposed a test-side race: it checked the saved cl
 Application SHA256: `52629fe3f3c900a377e17843065ef819f3bc6865877e5f3308a4723619573ee2`. Private recovery image: `recovery/2026-11-18-phase-4d/before-microphone-full-flash.bin`, 8,388,608 bytes, SHA256 `0d48e0017f2ea47382e71c0c95465593a4bf132480bff4c9a1994b6faa21686f`. Tested write files, generated configuration and manifest are archived under that directory's `built-microphone/` folder.
 
 Final private evidence: `logs/esp32-microphone-preflash.json`, `esp32-microphone-calibrator-build.log`, `esp32-microphone-calibrator-flash.log`, `esp32-calibrator-hardware-qa.json`, `esp32-microphone-host-tests.json`, `calibrator-ui-test.log` and `esp32-microphone-voice-regression-build.log`. User evidence will appear under `logs/microphone-calibration/`; the review tool currently reports no completed user calibration. Next: review those saved measurements before a controlled microphone-to-Gemini question/answer.
+
+## 2026-11-18 — Calibration incorporated; manual question test ready
+
+The user finished and closed the standalone calibrator, then requested that its data be applied and development continue while they were away from the robot. Reviewed the actual complete session, not demo/QA data: `2026-11-18_12-20-12_18333abe`, closed at 20:22:04 UTC. All six attempts were explicitly kept, with three speech-window-fit confirmations. The optional wake check was skipped. Original JSON SHA256: `488860de012e4eedd394ceaa223824c2cc23f58bc6368ccb1be87694c404636f`; the source file remains unchanged at its measured shift 14.
+
+| Accepted speech sample, shift 14 | Overall RMS | Peak | Clipped | Same-input shift-12 clipping-limit count |
+|---|---:|---:|---:|---:|
+| 1 | 2,434 | 17,049 | 0 | 745 |
+| 2 | 1,868 | 15,231 | 0 | 394 |
+| 3 | 2,665 | 15,576 | 0 | 928 |
+
+Median quiet-window RMS was 747 and median active speech-window RMS was 3,231: **12.72 dB level contrast**, not a laboratory SNR. No near-full-scale raw words were counted. The maximum speech peak was 52% of int16 full scale, slightly above the chosen half-scale headroom target. Applied capture shift **15** in Kconfig/defaults and the generated builds, retaining **four seconds** and wake shift **12**. The expected largest peak at 15 is at most approximately **8,525**, about 11.7 dB below full scale. That is a prediction from the recorded raw peak; human speech at the new gain is checked by the next question test. No new filter/noise gate was added. Applied decision metadata is separate in ignored `logs/microphone-calibration-applied.json`.
+
+Added an opt-in `question` profile. Explicit serial q initiates one calibrated capture through the existing local controller. Only that capture can retain its PCM allocation for direct transfer from the audio worker to the session task; ordinary wake and calibration still wipe locally. The local end cue precedes the cloud request. The established Worker/TLS path then sends 100 little-endian PCM/base64 frames at 16 kHz, paced at 40 ms, followed by EOF while processing incoming messages. Input is wiped after EOF or on failure. Existing strict bounded reply validation, closure, output-task playback and READY/wake recovery remain in force. Cancellation, duplicate/local/cloud guards, and pre-upload network loss clear retained input and do not retry.
+
+Added a separate Desktop **Robot Spoken Question Test** and root launcher. The user connects, starts each question, follows firmware-synchronized SPEAK NOW, hears the answer and explicitly confirms clear/correct speech and READY. All available numeric capture and output data, errors/cancellation and human feedback autosave under `logs/robot-question-tests/`. Input measurements save before cloud completion, so a later cloud failure does not lose microphone-level evidence. No PCM, transcript, provider message or credential-bearing URL is saved. The original calibrator remains local-only and its UI regression passes.
+
+| Verification | Result |
+|---|---|
+| Build and preflight | PASS: 99 compile-time policy assertions, including eight input encoding/bounds/endianness/EOF checks; secure CA/name/date configuration, five transport units with logging compiled out, credential and unsafe upgrade strings absent, NVS excluded |
+| Host/app tests | PASS: 45 preceding tests + seven question checks, including actual Tk countdown/review/save-failure/retry/close workflow; preceding full six-sample calibrator UI regression also passes |
+| Question build/flash | PASS: 2,579,888-byte app; guarded development MAC; write hashes verified; calibrated policy confirmed on COM26 |
+| Offline q | PASS: rejected before capture or session request |
+| Calibrator exclusion | PASS: held calibration control rejects q before capture/upload |
+| Early cancellation/guards | PASS: duplicate q, synthetic n, face/cue, greeting and session attempts cannot compete; cancelling local question capture clears data and rearms wake |
+| Retained complete capture | PASS: after starting q, Wi-Fi was stopped before completion; the complete four-second question is discarded instead of requesting a session; subsequent normal capture succeeds |
+| Ordinary capture recovery | PASS: 64,000 actual samples / 128,000 bytes, shift 15, raw/four-window metadata, local cue and idle after discarded question |
+| Actual app USB adapter | PASS: verifies board, checks calibrated policy, connects saved Wi-Fi, pauses wake and closes offline safely, without starting a question |
+| Earlier profile | PASS: `microphone` rebuilt at shift 15 with question feature disabled; not flashed over current question firmware |
+| Unattended privacy | No provider request or microphone upload in hardware QA; ambient captures were local recovery checks and do not count as human speech samples |
+| Human question/answer | PENDING: prompted user to run the Desktop test when back in a quiet room; no timed speech window started while they were away |
+
+One source edit hit Windows' default text-decoding mismatch; it was corrected to explicit UTF-8 before the final rebuild. No dependency or Worker deployment change was needed. Windows Computer Use inspection remains unavailable; UI event-loop/layout checks use isolated demo data and do not claim physical audio confirmation.
+
+Application SHA256: `265b91f4d846c30a4b8d0454b55a66929f9e09fbb733ee5692a98728805170d8`. Pre-question private full-flash backup: `recovery/2026-11-18-phase-4e/before-question-full-flash.bin`, 8,388,608 bytes, SHA256 `76e0895a53b89d55b910cd942b74d4a0796d781e8b0232cb34966372dad816f5`. It preserves the preceding calibrator firmware/NVS. Original backups remain intact. Tested question write files/configuration/manifest are archived in that directory's `built-question/` subdirectory.
+
+Final ignored evidence: `esp32-question-preflash.json`, `esp32-question-build-final.log`, `esp32-question-flash.log`, `esp32-question-local-qa.json`, `robot-question-host-tests.log`, `calibrator-question-regression-ui.log`, and `esp32-question-microphone-regression-build.log` under `logs/`. **Microphone measurements are incorporated; the one spoken question/answer milestone remains unverified until the user's saved test result is reviewed.** See [question procedure](ESP32_QUESTIONS.md).

@@ -1,6 +1,6 @@
 # Bounded local microphone capture
 
-**Current COM26 update, 2026-11-18:** the separate `microphone` profile extends capture to four seconds / 64,000 samples / 128,000 bytes, with provisional capture shift 14 and unchanged wake shift 12. Its standalone Windows app provides user-paced quiet/speech tests and autosaves results for later review. Human calibration remains pending. [Open the calibrator](MICROPHONE_CALIBRATOR.md). The two-second behavior and commands below document the preceding profiles.
+**Current COM26 update, 2026-11-18:** the `question` profile uses four seconds / 64,000 samples / 128,000 bytes, with reviewed capture shift 15 and unchanged wake shift 12. User calibration is complete. Normal wake and the [calibrator](MICROPHONE_CALIBRATOR.md) remain local; only the separate, explicit [manual question command](ESP32_QUESTIONS.md) transfers its own capture to Gemini. The two-second behavior and commands below document the preceding profiles.
 
 Phase 2b replaces the timed LISTENING rehearsal with a real, bounded PCM segment. It uses the existing audio input task and board/codec. The diagnostic profile still starts with Wi-Fi off and no cloud protocol.
 

@@ -47,10 +47,18 @@ config COMPANION_MICROPHONE_SHIFT
     int "Local capture PCM right shift"
     depends on COMPANION_MICROPHONE_PREP
     range 12 18
-    default 14
+    default 15
     help
         Fixed capture-only conversion gain. Each extra bit adds approximately
         6 dB of digital headroom. Existing wake-word conversion remains at 12.
+
+config COMPANION_GEMINI_QUESTION_PROBE
+    bool "Companion manual microphone question"
+    depends on COMPANION_MICROPHONE_PREP
+    default n
+    help
+        Add an explicit USB-started four-second microphone question, followed
+        by a bounded Gemini audio reply. Wake and calibration remain local.
 
 config OTA_URL
     string "Default OTA URL"

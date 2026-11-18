@@ -2,9 +2,9 @@
 
 Use the development unit on **COM26**. Leave the original working robot separate.
 
-COM26 currently runs the [microphone-calibrator profile](MICROPHONE_CALIBRATOR.md), which adds four-second local capture and self-paced USB calibration control to the verified manual speaker checkpoint. Wi-Fi is off at boot. Use the separate [local diagnostics profile](DIAGNOSTICS.md) for checks without the session module. Normal baseline commands below restore the original application behavior with English wake.
+COM26 currently runs the [manual microphone-question profile](ESP32_QUESTIONS.md), which adds an explicit USB-started cloud question to calibrated four-second capture. Normal wake and the separate calibrator remain local; Wi-Fi is off at boot. Use the separate [local diagnostics profile](DIAGNOSTICS.md) for checks without the session module. Normal baseline commands below restore the original application behavior with English wake.
 
-Build/flash the current increment with `-Profile microphone`; it uses `build-microphone/` and `sdkconfig.microphone.generated`. The wrapper verifies the development MAC on COM26 before flashing. The previous speaker, setup and session profiles remain available as `voice`, `gemini` and `session`, each with separate build/configuration files. Original backups and `build-diagnostics/` remain available. The device's NVS credential survives normal application flashing; a full flash restore returns NVS to that backup's earlier state.
+Build/flash the current increment with `-Profile question`; it uses `build-question/` and `sdkconfig.question.generated`. The local-only calibration alternative is `-Profile microphone`. Both now seed capture shift 15. The wrapper verifies the development MAC on COM26 before flashing. The preceding `voice`, `gemini` and `session` profiles retain separate build/configuration files. Original backups and `build-diagnostics/` remain available. The device's NVS credential survives normal application flashing; a full flash restore returns NVS to that backup's earlier state.
 
 ## Pinned setup
 

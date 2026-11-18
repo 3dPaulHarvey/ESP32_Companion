@@ -17,4 +17,10 @@ bool RequestVoice();
 VoiceStage GetVoiceStage();
 void AcknowledgeVoice();
 #endif
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+void SetQuestionCaptureGuard(bool active);
+bool RequestQuestion(std::uint32_t capture_id);
+void CancelQuestion();
+bool QuestionCancelled();
+#endif
 }

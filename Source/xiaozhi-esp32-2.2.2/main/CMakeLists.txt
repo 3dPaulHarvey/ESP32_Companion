@@ -56,6 +56,9 @@ endif()
 if(CONFIG_COMPANION_MICROPHONE_PREP)
     list(APPEND SOURCES "../tests/companion_microphone_policy_test.cpp")
 endif()
+if(CONFIG_COMPANION_GEMINI_QUESTION_PROBE)
+    list(APPEND SOURCES "../tests/companion_question_policy_test.cpp")
+endif()
 
 # Add board common files
 list(APPEND SOURCES

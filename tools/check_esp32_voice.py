@@ -22,8 +22,8 @@ FIELDS = ["ok", "http", "reason", "upgrade_http", "setup_ack", "prompt_sent", "t
     "duration_ms", "rms", "peak", "clipped", "playback_ms", "elapsed_ms"]
 
 
-def voice_metadata(text):
-    match = re.search(VOICE_RESULT, text)
+def voice_metadata(text, pattern=VOICE_RESULT):
+    match = re.search(pattern, text)
     if not match:
         raise CheckFailure("Voice result did not match the controlled contract.")
     values = {key: value if key == "reason" else int(value) for key, value in zip(FIELDS, match.groups())}

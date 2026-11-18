@@ -183,6 +183,9 @@ void AudioService::Stop() {
     {
         std::lock_guard<std::mutex> capture_lock(local_capture_mutex_);
         local_capture_cancel_requested_ = local_capture_requested_;
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+        question_audio_.reset();
+#endif
     }
     xEventGroupSetBits(event_group_, AS_EVENT_LOCAL_CAPTURE_RUNNING);
 #endif
@@ -375,8 +378,13 @@ void AudioService::AudioInputTask() {
 }
 
 #if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
-bool AudioService::BeginLocalCapture(uint32_t request_id) {
+bool AudioService::BeginLocalCapture(uint32_t request_id, bool retain_question) {
     std::lock_guard<std::mutex> lock(local_capture_mutex_);
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+    if (question_audio_) return false;
+#else
+    if (retain_question) return false;
+#endif
     if (service_stopped_ || codec_ == nullptr || local_capture_requested_ || local_capture_result_ready_) {
         return false;
     }
@@ -388,6 +396,9 @@ bool AudioService::BeginLocalCapture(uint32_t request_id) {
         return false;
     }
     local_capture_request_id_ = request_id;
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+    local_capture_retain_question_ = retain_question;
+#endif
     ++local_capture_generation_;
     local_capture_cancel_requested_ = false;
     local_capture_requested_ = true;
@@ -412,9 +423,26 @@ void AudioService::CancelLocalCapture(uint32_t request_id) {
     }
 }
 
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+std::unique_ptr<companion_question::Pcm> AudioService::TakeQuestionAudio(uint32_t request_id) {
+    std::lock_guard<std::mutex> lock(local_capture_mutex_);
+    if (!question_audio_ || question_audio_->request() != request_id) return nullptr;
+    return std::move(question_audio_);
+}
+void AudioService::DiscardQuestionAudio(uint32_t request_id) {
+    std::lock_guard<std::mutex> lock(local_capture_mutex_);
+    if (question_audio_ && question_audio_->request() == request_id) question_audio_.reset();
+}
+#endif
+
 void AudioService::RunLocalCapture() {
     uint32_t request_id;
     uint32_t generation;
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+    static_assert(companion_question::kSamples == companion_capture::kSamples);
+    bool retain_question;
+    std::unique_ptr<companion_question::Pcm> retained;
+#endif
     {
         std::lock_guard<std::mutex> lock(local_capture_mutex_);
         if (!local_capture_requested_) {
@@ -423,14 +451,17 @@ void AudioService::RunLocalCapture() {
         }
         request_id = local_capture_request_id_;
         generation = local_capture_generation_;
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+        retain_question = local_capture_retain_question_;
+#endif
     }
 
     const int64_t started_us = esp_timer_get_time();
     LocalPcmCaptureResult result;
     result.request_id = request_id;
     {
-        // Every exit from this scope erases and frees the worker-owned segment
-        // before completed metadata becomes visible to the UI task.
+        // Local/calibration segments are erased before metadata publication.
+        // Only an explicit question can move this allocation to its session.
         struct CaptureStorage {
             int16_t* data = static_cast<int16_t*>(heap_caps_malloc(
                 companion_capture::kBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -536,6 +567,13 @@ void AudioService::RunLocalCapture() {
 #if CONFIG_COMPANION_MICROPHONE_PREP
         result.microphone = headroom.Result();
 #endif
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+        if (result.success && retain_question) {
+            retained.reset(new (std::nothrow) companion_question::Pcm(request_id, storage.data));
+            if (retained) storage.data = nullptr;
+            else { result.success = false; result.status = LocalPcmCaptureStatus::AllocationFailed; }
+        }
+#endif
     }
 
     std::lock_guard<std::mutex> lock(local_capture_mutex_);
@@ -546,6 +584,10 @@ void AudioService::RunLocalCapture() {
             result.success = false;
             result.status = service_stopped_ ? LocalPcmCaptureStatus::ServiceStopped : LocalPcmCaptureStatus::Cancelled;
         }
+#if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+        if (!result.success) retained.reset();
+        question_audio_ = std::move(retained);
+#endif
         xEventGroupClearBits(event_group_, AS_EVENT_LOCAL_CAPTURE_RUNNING);
         local_capture_result_ = result;
         local_capture_result_ready_ = true;
