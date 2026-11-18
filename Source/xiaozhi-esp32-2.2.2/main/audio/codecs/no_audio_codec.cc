@@ -251,6 +251,28 @@ int NoAudioCodec::Write(const int16_t* data, int samples) {
     return bytes_written / sizeof(int32_t);
 }
 
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+esp_err_t NoAudioCodec::WriteDiagnosticPcm(const int16_t* data, size_t samples,
+                                          size_t& written, uint32_t timeout_ms) {
+    written = 0;
+    if (!data || !samples || samples > 480 || timeout_ms > 250 || !output_enabled_) return ESP_ERR_INVALID_ARG;
+    std::lock_guard<std::mutex> lock(data_if_mutex_);
+    std::unique_ptr<int32_t[]> buffer(new (std::nothrow) int32_t[samples]);
+    if (!buffer) return ESP_ERR_NO_MEM;
+    const int32_t factor = pow(double(output_volume_) / 100.0, 2) * 65536;
+    for (size_t i = 0; i < samples; ++i) {
+        // Same 16-to-32-bit slot conversion and saved volume as normal output,
+        // with half amplitude for this first speech test.
+        const int64_t value = int64_t(data[i]) * factor / 2;
+        buffer[i] = value > INT32_MAX ? INT32_MAX : value < INT32_MIN ? INT32_MIN : static_cast<int32_t>(value);
+    }
+    size_t bytes = 0;
+    const auto error = i2s_channel_write(tx_handle_, buffer.get(), samples * sizeof(int32_t), &bytes, timeout_ms);
+    written = std::min(bytes / sizeof(int32_t), samples);
+    return bytes % sizeof(int32_t) ? ESP_FAIL : error;
+}
+#endif
+
 int NoAudioCodec::Read(int16_t* dest, int samples) {
     size_t bytes_read;
 

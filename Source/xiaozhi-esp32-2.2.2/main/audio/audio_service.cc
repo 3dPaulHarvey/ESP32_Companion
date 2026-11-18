@@ -533,19 +533,47 @@ void AudioService::AudioOutputTask() {
 
         auto task = std::move(audio_playback_queue_.front());
         audio_playback_queue_.pop_front();
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+        output_in_progress_ = true;
+        const bool diagnostic_can_write = !diagnostic_error_;
+#endif
         audio_queue_cv_.notify_all();
         lock.unlock();
 
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+        last_output_time_ = std::chrono::steady_clock::now();
+#endif
         if (!codec_->output_enabled()) {
             esp_timer_stop(audio_power_timer_);
             esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
             codec_->EnableOutput(true);
         }
-        codec_->OutputData(task->pcm);
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+        if (task->diagnostic_pcm) {
+            size_t written = 0;
+            const auto error = diagnostic_can_write
+                ? codec_->WriteDiagnosticPcm(task->pcm.data(), task->pcm.size(), written, 250) : ESP_FAIL;
+            std::fill(task->pcm.begin(), task->pcm.end(), 0);
+            lock.lock();
+            if (!task->diagnostic_silence) diagnostic_written_ += written;
+            if (error != ESP_OK || written != task->pcm.size()) diagnostic_error_ = true;
+            lock.unlock();
+        } else
+#endif
+        { codec_->OutputData(task->pcm); }
 
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();
         debug_statistics_.playback_count++;
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+        lock.lock();
+        output_in_progress_ = false;
+        if (diagnostic_abandoned_ && audio_playback_queue_.empty()) {
+            diagnostic_playback_ = false; diagnostic_abandoned_ = false;
+        }
+        audio_queue_cv_.notify_all();
+        lock.unlock();
+#endif
 
 #if CONFIG_USE_SERVER_AEC
         /* Record the timestamp for server AEC */
@@ -573,6 +601,9 @@ void AudioService::OpusCodecTask() {
 
         /* Decode the audio from decode queue */
         if (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE) {
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+            decode_in_progress_ = true;
+#endif
             auto packet = std::move(audio_decode_queue_.front());
             audio_decode_queue_.pop_front();
             audio_queue_cv_.notify_all();
@@ -625,6 +656,10 @@ void AudioService::OpusCodecTask() {
                 lock.lock();
             }
             debug_statistics_.decode_count++;
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+            decode_in_progress_ = false;
+            audio_queue_cv_.notify_all();
+#endif
         }
         /* Encode the audio to send queue */
         if (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) {
@@ -740,6 +775,9 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
 
 bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait) {
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    if (diagnostic_playback_) return false;
+#endif
     if (audio_decode_queue_.size() >= MAX_DECODE_PACKETS_IN_QUEUE) {
         if (wait) {
             audio_queue_cv_.wait(lock, [this]() { return audio_decode_queue_.size() < MAX_DECODE_PACKETS_IN_QUEUE; });
@@ -972,8 +1010,62 @@ bool AudioService::IsIdle() {
     }
 #endif
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    if (diagnostic_playback_ || output_in_progress_ || decode_in_progress_) return false;
+#endif
     return audio_encode_queue_.empty() && audio_decode_queue_.empty() && audio_playback_queue_.empty() && audio_testing_queue_.empty();
 }
+
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+bool AudioService::IsDiagnosticPcmBusy() {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    return diagnostic_playback_;
+}
+
+bool AudioService::PlayDiagnosticPcm(const int16_t* pcm, size_t samples, uint32_t& played) {
+    played = 0;
+    if (!pcm || !samples || samples > 24000 * 10 || codec_->output_sample_rate() != 24000 || codec_->output_channels() != 1) return false;
+    std::unique_lock<std::mutex> lock(audio_queue_mutex_);
+    if (service_stopped_ || diagnostic_playback_ || output_in_progress_ || decode_in_progress_ ||
+        !audio_decode_queue_.empty() || !audio_playback_queue_.empty()) return false;
+    diagnostic_playback_ = true; diagnostic_error_ = false; diagnostic_written_ = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(samples / 24 + 2000);
+    size_t offset = 0;
+    // 80 ms of trailing silence exceeds this board's 60 ms DMA capacity.
+    // Waiting for these writes lets the last real samples leave the speaker
+    // before the UI returns to READY and wake detection is rearmed.
+    while (offset < samples + 1920 && !diagnostic_error_ && !service_stopped_) {
+        if (!audio_queue_cv_.wait_until(lock, deadline, [this]() {
+            return diagnostic_error_ || service_stopped_ || audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE;
+        })) { diagnostic_error_ = true; break; }
+        if (diagnostic_error_ || service_stopped_) break;
+        const bool silence = offset >= samples;
+        const size_t count = std::min<size_t>(480, (silence ? samples + 1920 : samples) - offset);
+        auto task = std::make_unique<AudioTask>();
+        task->type = kAudioTaskTypeDecodeToPlaybackQueue; task->timestamp = 0;
+        task->diagnostic_pcm = true; task->diagnostic_silence = silence;
+        if (silence) task->pcm.assign(count, 0);
+        else task->pcm.assign(pcm + offset, pcm + offset + count);
+        audio_playback_queue_.push_back(std::move(task));
+        offset += count;
+        audio_queue_cv_.notify_all();
+    }
+    if (!audio_queue_cv_.wait_until(lock, deadline, [this]() {
+        return diagnostic_error_ || service_stopped_ || (audio_playback_queue_.empty() && !output_in_progress_);
+    })) diagnostic_error_ = true;
+    if (diagnostic_error_ || service_stopped_) {
+        for (auto& task : audio_playback_queue_) std::fill(task->pcm.begin(), task->pcm.end(), 0);
+        audio_playback_queue_.clear();
+        audio_queue_cv_.notify_all();
+        audio_queue_cv_.wait_for(lock, std::chrono::milliseconds(500), [this]() { return !output_in_progress_; });
+    }
+    played = diagnostic_written_;
+    const bool success = !diagnostic_error_ && !service_stopped_ && !output_in_progress_ && played == samples;
+    diagnostic_abandoned_ = output_in_progress_;
+    if (!diagnostic_abandoned_) diagnostic_playback_ = false;
+    return success;
+}
+#endif
 
 void AudioService::WaitForPlaybackQueueEmpty() {
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);

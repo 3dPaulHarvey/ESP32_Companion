@@ -4,7 +4,7 @@ Phase 2b replaces the timed LISTENING rehearsal with a real, bounded PCM segment
 
 Status: built and flashed on COM26. Automated capture/cancellation checks and three voice-triggered captures passed in serial. After the steady-pose/status-label correction, the user reports that the recent physical test is working well (2026-11-17). This confirms the interaction at the device; no new serial capture or exact cycle count was supplied for that follow-up. Microphone gain/headroom calibration remains open before voice streaming. Independent local Worker preparation can proceed meanwhile.
 
-The current [session profile](ESP32_SESSIONS.md) retains this exact local capture path. Phase 4a additionally verified a serial-triggered capture/cue cycle during an HTTPS session request and user-confirmed eyes/wake/listening/cue. Captured PCM still is not handed to the network in that profile.
+The current [voice profile](ESP32_VOICE.md) retains this exact local capture path; its separate manual greeting sends only fixed text. Phase 4a additionally verified a serial-triggered capture/cue cycle during an HTTPS session request and user-confirmed eyes/wake/listening/cue. Captured PCM is still not handed to the network.
 
 ## Interaction
 

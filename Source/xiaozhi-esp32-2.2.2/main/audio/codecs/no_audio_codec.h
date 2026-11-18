@@ -16,6 +16,10 @@ protected:
 
 public:
     virtual ~NoAudioCodec();
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    esp_err_t WriteDiagnosticPcm(const int16_t* data, size_t samples,
+                                size_t& written, uint32_t timeout_ms) override;
+#endif
 #if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
     esp_err_t ReadLocalCaptureInput(int16_t* data, size_t capacity_samples,
                                   size_t& samples_read, uint32_t timeout_ms) override;

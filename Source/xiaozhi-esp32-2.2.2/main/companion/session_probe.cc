@@ -3,6 +3,10 @@
 #if CONFIG_COMPANION_GEMINI_SETUP_PROBE
 #include "gemini_setup.h"
 #endif
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+#include "gemini_voice.h"
+#include "application.h"
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -35,11 +39,14 @@ constexpr char kTag[] = "CompanionSession";
 constexpr char kUrl[] = "https://esp32-companion-control.stiener.workers.dev/device/session";
 constexpr char kNamespace[] = "companion";
 constexpr char kCredentialKey[] = "device_auth";
-enum class Kind { Session, Wrong, Missing, Gemini };
+enum class Kind { Session, Wrong, Missing, Gemini, Voice };
 const char* KindName(Kind kind) {
-    return kind == Kind::Session ? "session" : kind == Kind::Wrong ? "wrong" : kind == Kind::Missing ? "missing" : "gemini";
+    return kind == Kind::Session ? "session" : kind == Kind::Wrong ? "wrong" : kind == Kind::Missing ? "missing" : kind == Kind::Gemini ? "gemini" : "voice";
 }
 std::atomic<bool> busy{false};
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+std::atomic<CompanionSessionProbe::VoiceStage> voice_stage{CompanionSessionProbe::VoiceStage::Idle};
+#endif
 std::atomic<std::int64_t> retry_until_us{0};
 Kind pending_kind = Kind::Session;
 companion_session::CredentialFrame provision_frame;
@@ -127,6 +134,11 @@ struct Result {
 #if CONFIG_COMPANION_GEMINI_SETUP_PROBE
     CompanionGeminiSetup::Result gemini{};
 #endif
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    companion_voice::AudioState audio{};
+    uint32_t played_samples = 0, playback_ms = 0;
+    unsigned rms = 0;
+#endif
 };
 
 bool EnsureTime() {
@@ -212,7 +224,7 @@ Result FetchSession(Kind kind, ResponseBody& body, std::string_view& temporary) 
         }
     }
     const std::string_view payload(body.data, used);
-    if (kind == Kind::Session || kind == Kind::Gemini) {
+    if (kind == Kind::Session || kind == Kind::Gemini || kind == Kind::Voice) {
         if (!companion_session::ValidateSession(payload, static_cast<int64_t>(std::time(nullptr)) * 1000,
                 std::string_view(credential.value, 64), result.metadata, &temporary)) {
             result.reason = "invalid_session_response"; return result;
@@ -239,13 +251,40 @@ Result Perform(Kind kind) {
         result.reason = result.gemini.reason;
     }
 #endif
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    if (result.ok && kind == Kind::Voice) {
+        if (result.metadata.start_in_seconds < 20) { result.ok = false; result.reason = "session_window_too_short"; return result; }
+        CompanionGeminiVoice::Reply reply;
+        result.gemini = CompanionGeminiSetup::ReceiveGreeting(temporary, reply);
+        result.ok = result.gemini.ok;
+        result.reason = result.gemini.reason;
+        result.audio = reply.state;
+        result.rms = reply.rms();
+        if (result.ok) {
+            // The cloud transport is already closed. Only the established
+            // audio output task writes PCM; the UI loop owns expressions.
+            voice_stage.store(CompanionSessionProbe::VoiceStage::Speaking);
+            const auto started = esp_timer_get_time();
+            result.ok = Application::GetInstance().GetAudioService().PlayDiagnosticPcm(
+                reply.samples(), reply.state.bytes / sizeof(int16_t), result.played_samples);
+            // Keep wake detection disabled while the microphone's DMA history
+            // passes the final speaker samples. This is local settling time.
+            if (result.ok) vTaskDelay(pdMS_TO_TICKS(150));
+            result.playback_ms = static_cast<uint32_t>((esp_timer_get_time() - started) / 1000);
+            if (!result.ok) result.reason = "playback_failed";
+        }
+    }
+#endif
     return result;
 }
 
-void Request(Kind kind) {
-    if (esp_timer_get_time() < retry_until_us.load()) { ESP_LOGW(kTag, "REQUEST_REJECTED reason=retry_window"); return; }
+bool Request(Kind kind) {
+    if (esp_timer_get_time() < retry_until_us.load()) { ESP_LOGW(kTag, "REQUEST_REJECTED reason=retry_window"); return false; }
     bool expected = false;
-    if (!busy.compare_exchange_strong(expected, true)) { ESP_LOGW(kTag, "REQUEST_REJECTED reason=busy"); return; }
+    if (!busy.compare_exchange_strong(expected, true)) { ESP_LOGW(kTag, "REQUEST_REJECTED reason=busy"); return false; }
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    if (kind == Kind::Voice) voice_stage.store(CompanionSessionProbe::VoiceStage::Connecting);
+#endif
     pending_kind = kind;
     const auto created = xTaskCreate([](void*) {
         const auto kind = pending_kind;
@@ -260,24 +299,56 @@ void Request(Kind kind) {
                 static_cast<unsigned long>(result.gemini.elapsed_ms));
         }
 #endif
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+        if (kind == Kind::Voice) {
+            ESP_LOGI("CompanionVoice", "RESULT ok=%d http=%d reason=%s upgrade_http=%d setup_ack=%d prompt_sent=%d turn_complete=%d close_sent=%d close_ack=%d close_code=%u audio_bytes=%u chunks=%u sample_rate=24000 played_samples=%lu duration_ms=%u rms=%u peak=%u clipped=%u playback_ms=%lu elapsed_ms=%lu cleanup=1 no_audio_upload=1",
+                result.ok, result.http_status, result.reason, result.gemini.upgrade_http, result.gemini.setup_ack,
+                result.gemini.prompt_sent, result.audio.turn_complete, result.gemini.close_sent, result.gemini.close_ack,
+                result.gemini.close_code, static_cast<unsigned>(result.audio.bytes), result.audio.chunks,
+                static_cast<unsigned long>(result.played_samples), static_cast<unsigned>(result.audio.bytes / 48),
+                result.rms, result.audio.peak, result.audio.clipped, static_cast<unsigned long>(result.playback_ms),
+                static_cast<unsigned long>((esp_timer_get_time() - started) / 1000));
+        }
+#endif
         ESP_LOGI(kTag, "RESULT kind=%s ok=%d http=%d reason=%s temporary_bytes=%u start_in_s=%d expires_in_s=%d elapsed_ms=%lu discarded=1",
             KindName(kind), result.ok, result.http_status, result.reason,
             static_cast<unsigned>(result.metadata.temporary_bytes), result.metadata.start_in_seconds,
             result.metadata.expires_in_seconds, static_cast<unsigned long>((esp_timer_get_time() - started) / 1000));
         busy.store(false);
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+        if (kind == Kind::Voice) voice_stage.store(CompanionSessionProbe::VoiceStage::Finished);
+#endif
         vTaskDelete(nullptr);
-    }, "session_probe", kind == Kind::Gemini ? 16384 : 12288, nullptr, 1, nullptr);
-    if (created != pdPASS) { busy.store(false); ESP_LOGE(kTag, "REQUEST_REJECTED reason=task_allocation_failed"); }
+    }, "session_probe", kind == Kind::Voice ? 16384 : kind == Kind::Gemini ? 16384 : 12288, nullptr, 1, nullptr);
+    if (created != pdPASS) {
+        busy.store(false);
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+        if (kind == Kind::Voice) voice_stage.store(CompanionSessionProbe::VoiceStage::Idle);
+#endif
+        ESP_LOGE(kTag, "REQUEST_REJECTED reason=task_allocation_failed");
+    }
+    return created == pdPASS;
 }
 }  // namespace
 
 namespace CompanionSessionProbe {
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+bool RequestVoice() {
+    if (!WifiManager::GetInstance().IsConnected()) { ESP_LOGW("CompanionVoice", "REQUEST_REJECTED reason=wifi_required"); return false; }
+    return Request(Kind::Voice);
+}
+VoiceStage GetVoiceStage() { return voice_stage.load(); }
+void AcknowledgeVoice() { voice_stage.store(VoiceStage::Idle); }
+#endif
 void Initialize() {
     ESP_LOGI(kTag, "MODE manual-session-probe no_audio_upload=1 automatic_requests=0");
     ESP_LOGI(kTag, "COMMANDS g=session-check b=wrong-credential-check u=missing-credential-check provision=private-host-tool");
 #if CONFIG_COMPANION_GEMINI_SETUP_PROBE
     CompanionGeminiSetup::Initialize();
     ESP_LOGI(kTag, "COMMANDS j=direct-Gemini-setup-check");
+#endif
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    ESP_LOGI("CompanionVoice", "COMMANDS v=fixed-Gemini-greeting no_audio_upload=1");
 #endif
     PrintStatus();
 }
@@ -289,6 +360,9 @@ void PrintStatus() {
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], LoadCredential(credential), busy.load());
 #if CONFIG_COMPANION_GEMINI_SETUP_PROBE
     ESP_LOGI(kTag, "FEATURES gemini_setup=1 automatic_requests=0 audio_upload=0");
+#endif
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    ESP_LOGI(kTag, "VOICE_FEATURE enabled=1 fixed_greeting=1 automatic_requests=0 audio_upload=0");
 #endif
 }
 void Poll(std::int64_t now_us) {

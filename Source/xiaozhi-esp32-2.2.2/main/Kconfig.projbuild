@@ -27,6 +27,14 @@ config COMPANION_GEMINI_SETUP_PROBE
         Add a manual secure WebSocket setup/close check using a fresh temporary
         session credential. No question or microphone audio is sent.
 
+config COMPANION_GEMINI_VOICE_PROBE
+    bool "Companion manual Gemini speaker check"
+    depends on COMPANION_GEMINI_SETUP_PROBE
+    default n
+    help
+        Receive one fixed greeting, close the cloud connection, then play
+        bounded 24 kHz PCM through the existing output task. No audio upload.
+
 config OTA_URL
     string "Default OTA URL"
     default "https://api.tenclass.net/xiaozhi/ota/"

@@ -1,5 +1,8 @@
 #include "gemini_setup.h"
 #include "gemini_setup_policy.h"
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+#include "gemini_voice.h"
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -55,10 +58,17 @@ int Send(esp_transport_handle_t ws, unsigned opcode, char* data, std::size_t siz
         data, static_cast<int>(size), timeout_ms);
 }
 
-CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary) {
+CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary, CompanionGeminiVoice::Reply* reply = nullptr) {
     CompanionGeminiSetup::Result result;
+    std::size_t message_limit = companion_gemini::kMessageLimit;
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    if (reply) {
+        if (!reply->ready()) { result.reason = "allocation_failed"; return result; }
+        message_limit = companion_voice::kMessageLimit;
+    }
+#endif
     PrivateBuffer path(companion_gemini::kPathCapacity);
-    PrivateBuffer message(companion_gemini::kMessageLimit + 1);
+    PrivateBuffer message(message_limit + 1);
     Scratch scratch;
     if (!path.data || !message.data) { result.reason = "allocation_failed"; return result; }
     std::size_t path_size = 0;
@@ -79,7 +89,7 @@ CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary) {
     if (esp_transport_ws_set_config(transport.ws, &config) != ESP_OK) {
         result.reason = "websocket_config_failed"; return result;
     }
-    ESP_LOGI(kTag, "CONNECT_BEGIN no_question=1 no_audio_upload=1");
+    ESP_LOGI(kTag, "CONNECT_BEGIN no_question=%d no_audio_upload=1", reply ? 0 : 1);
     const int connected = esp_transport_connect(transport.ws, kHost, 443, kTransportTimeoutMs);
     result.upgrade_http = esp_transport_ws_get_upgrade_request_status(transport.ws);
     // The transport reports redirect statuses as positive connect results.
@@ -91,8 +101,10 @@ CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary) {
         result.reason = "setup_send_failed"; return result;
     }
     mbedtls_platform_zeroize(setup, sizeof(setup));
-    companion_gemini::FrameTracker frames;
+    companion_gemini::FrameTracker frames(message_limit);
     std::size_t post_close_bytes = 0;
+    std::size_t response_bytes = 0;
+    unsigned response_messages = 0;
     auto deadline_us = esp_timer_get_time() + 20000000;
     while (esp_timer_get_time() < deadline_us) {
         const int timeout_ms = static_cast<int>(std::min<int64_t>(1000, (deadline_us - esp_timer_get_time()) / 1000));
@@ -112,7 +124,7 @@ CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary) {
             result.reason = "invalid_or_oversized_frame"; return result;
         }
         const auto offset = frames.control() ? frames.control_size() : frames.message_size();
-        const auto capacity = frames.control() ? sizeof(scratch.control) : companion_gemini::kMessageLimit;
+        const auto capacity = frames.control() ? sizeof(scratch.control) : message_limit;
         if (static_cast<size_t>(count) > capacity - offset) { result.reason = "oversized_message"; return result; }
         if (count) std::memcpy((frames.control() ? scratch.control : message.data) + offset, scratch.data, count);
         const auto piece = frames.Append(count);
@@ -128,43 +140,77 @@ CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary) {
                     static_cast<unsigned char>(scratch.control[1]) : 0;
                 if (!result.close_sent) {
                     Send(transport.ws, 8, scratch.control, size, 1000);
-                    result.reason = "closed_before_setup"; return result;
+                    result.reason = result.setup_ack ? "closed_before_turn" : "closed_before_setup"; return result;
                 }
                 result.close_ack = true;
                 result.ok = result.setup_ack && (result.close_code == 0 || result.close_code == 1000 || result.close_code == 1001);
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+                if (reply && (!result.prompt_sent || !reply->state.turn_complete || !reply->state.bytes)) result.ok = false;
+#endif
                 result.reason = result.ok ? "verified" : "unexpected_close_code";
                 return result;
             }
         } else if (piece == companion_gemini::PieceResult::Message) {
+            response_bytes += frames.message_size();
+            if (++response_messages > 256 || response_bytes > 2 * 1024 * 1024) {
+                result.reason = "response_limit"; return result;
+            }
             if (result.close_sent) {
                 // A server data message can already be in flight when our
                 // Close is sent. Drain it without interpreting its contents;
                 // only a close control frame can complete this check. Keep
                 // both the aggregate drain size and close deadline bounded.
                 post_close_bytes += frames.message_size();
-                if (post_close_bytes > companion_gemini::kMessageLimit) {
+                if (post_close_bytes > message_limit) {
                     result.reason = "oversized_close_drain"; return result;
                 }
                 ESP_LOGI(kTag, "CLOSE_DRAIN bytes=%u", static_cast<unsigned>(frames.message_size()));
                 frames.ResetMessage();
                 continue;
             }
-            if (!companion_gemini::IsSetupComplete(std::string_view(message.data, frames.message_size()))) {
+            if (!result.setup_ack) {
+                if (!companion_gemini::IsSetupComplete(std::string_view(message.data, frames.message_size()))) {
+                    result.reason = "unexpected_setup_response"; return result;
+                }
+                result.setup_ack = true;
+                result.ack_bytes = frames.message_size();
+                ESP_LOGI(kTag, "SETUP_ACK received=1 bytes=%u", result.ack_bytes);
+                frames.ResetMessage();
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+                if (reply) {
+                    char prompt[sizeof(companion_voice::kGreeting)];
+                    std::memcpy(prompt, companion_voice::kGreeting, sizeof(prompt));
+                    if (Send(transport.ws, 1, prompt, sizeof(prompt) - 1, 3000) != sizeof(prompt) - 1) {
+                        result.reason = "prompt_send_failed"; return result;
+                    }
+                    result.prompt_sent = true;
+                    ESP_LOGI("CompanionVoice", "PROMPT_SENT fixed_greeting=1 no_audio_upload=1");
+                    deadline_us = esp_timer_get_time() + 30000000;
+                    continue;
+                }
+#endif
+            } else {
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+                if (!reply || !reply->Consume(std::string_view(message.data, frames.message_size()))) {
+                    result.reason = reply ? reply->reason : "unexpected_setup_response"; return result;
+                }
+                frames.ResetMessage();
+                if (!reply->state.turn_complete) continue;
+                ESP_LOGI("CompanionVoice", "TURN_COMPLETE audio_bytes=%u chunks=%u sample_rate=24000",
+                    static_cast<unsigned>(reply->state.bytes), reply->state.chunks);
+#else
                 result.reason = "unexpected_setup_response"; return result;
+#endif
             }
-            result.setup_ack = true;
-            result.ack_bytes = frames.message_size();
-            ESP_LOGI(kTag, "SETUP_ACK received=1 bytes=%u", result.ack_bytes);
-            frames.ResetMessage();
             char close_payload[] = {0x03, static_cast<char>(0xe8)};
             if (Send(transport.ws, 8, close_payload, sizeof(close_payload), 1000) != sizeof(close_payload)) {
                 result.reason = "close_send_failed"; return result;
             }
             result.close_sent = true;
-            deadline_us = esp_timer_get_time() + 2000000;
+            deadline_us = esp_timer_get_time() + (reply ? 5000000 : 2000000);
         }
     }
-    result.reason = result.close_sent ? "close_timeout" : "setup_timeout";
+    result.reason = result.close_sent ? "close_timeout" : result.prompt_sent ? "turn_timeout" : "setup_timeout";
     return result;
 }
 }  // namespace
@@ -182,4 +228,12 @@ Result Verify(std::string_view temporary) {
     result.elapsed_ms = static_cast<uint32_t>((esp_timer_get_time() - started) / 1000);
     return result;
 }
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+Result ReceiveGreeting(std::string_view temporary, CompanionGeminiVoice::Reply& reply) {
+    const auto started = esp_timer_get_time();
+    auto result = VerifyConnection(temporary, &reply);
+    result.elapsed_ms = static_cast<uint32_t>((esp_timer_get_time() - started) / 1000);
+    return result;
+}
+#endif
 }  // namespace CompanionGeminiSetup

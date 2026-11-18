@@ -42,6 +42,8 @@ To build or flash local diagnostics, add `-Profile diagnostics` to the wrapper c
 
 **Phase 4a ESP32 session requests are verified:** private device-credential provisioning and HTTPS rejection/success checks pass, and local capture/cue recovery works during a request. [Session-only profile and results](docs/ESP32_SESSIONS.md).
 
-**Phase 4b direct ESP32 Gemini setup is verified:** COM26 now runs the `gemini` profile. Six consecutive final connections verify setup acknowledgment and clean closure; concurrent local capture, offline recovery and the user's eyes/wake/listening/cue check pass. Wi-Fi stays off at boot and wake remains local. Spoken Gemini output is next. [Current firmware behavior, commands and results](docs/ESP32_GEMINI_SETUP.md).
+**Phase 4b direct ESP32 Gemini setup is verified:** six consecutive final connections verify setup acknowledgment and clean closure; concurrent local capture, offline recovery and the user's eyes/wake/listening/cue check pass. [Setup profile and results](docs/ESP32_GEMINI_SETUP.md).
+
+**Phase 4c Gemini speech through the robot is verified:** COM26 now runs the `voice` profile. Manual `v` receives a fixed greeting, closes Gemini, plays bounded PCM through the existing speaker, and returns to READY. The user confirms clear speech at normal speed. Repeated output, busy guards and device-side Wi-Fi-loss recovery pass. Wi-Fi stays off at boot and wake remains local; microphone upload is the next gate. [Current behavior and repeat commands](docs/ESP32_VOICE.md). [Roadmap progress](docs/ROADMAP_STATUS.md).
 
 Based on [TechTalkies/Xiaozhi-for-XiaoESP32S3](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3), preserving the supplied licenses and attribution.

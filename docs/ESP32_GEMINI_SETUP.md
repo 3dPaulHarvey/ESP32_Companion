@@ -2,6 +2,8 @@
 
 Phase 4b **passed on COM26 on 2026-11-17**, including the user's local behavior check. The separate **gemini** profile requests a temporary session from the Worker, opens Google's secure WebSocket, receives `setupComplete`, exchanges close frames, and releases the connection. The permanent Gemini key stays in the existing Cloudflare Secret. No additional Cloudflare configuration is needed for this step.
 
+COM26 has since advanced to [Phase 4c's manual speaker profile](ESP32_VOICE.md). This page preserves the setup-only commands and historical Phase 4b results.
+
 ## What the robot does
 
 Boot remains Wi-Fi off, with the existing startup faces/tones and blinking READY eyes. Saying **Hi, E-S-P** still starts **LISTENING -> two-second local capture -> CUE -> READY**. Wake words do not start a cloud connection in this profile. This checkpoint gives no spoken Gemini answer.
@@ -61,4 +63,4 @@ Application SHA256: `892a7c5ebd62dc581374e007a424727aaa7881e4528edeaa11ac4a30ebf
 
 The pre-change full-flash backup is `recovery/2026-11-17-phase-4b/before-gemini-full-flash.bin`: 8,388,608 bytes, SHA256 `9550a5988dee3a54b64dd0ffaf9175632af4f3e711cb4e4e67f3f9ef84d38e0e`. It contains the development NVS credential and remains private/ignored. The original November 9 recovery image remains preserved separately.
 
-Next add bounded playback of a fixed Gemini reply through the robot's speaker. Microphone headroom and capture duration still need verification before live audio upload; the earlier successful desktop audio fixture lasted 2.41 seconds.
+Bounded playback of a fixed Gemini reply through the robot's speaker is now [verified in Phase 4c](ESP32_VOICE.md). Microphone headroom and capture duration still need verification before live audio upload; the earlier successful desktop audio fixture lasted 2.41 seconds.

@@ -26,6 +26,13 @@ public:
 
     virtual void OutputData(std::vector<int16_t>& data);
     virtual bool InputData(std::vector<int16_t>& data);
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    virtual esp_err_t WriteDiagnosticPcm(const int16_t* data, size_t samples,
+                                        size_t& written, uint32_t timeout_ms) {
+        (void)data; (void)samples; (void)timeout_ms; written = 0;
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+#endif
 #if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
     // Exact-count, finite-wait path for local capture only. Other codecs can
     // explicitly decline it without altering their normal input implementation.

@@ -99,6 +99,10 @@ struct AudioTask {
     AudioTaskType type;
     std::vector<int16_t> pcm;
     uint32_t timestamp;
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    bool diagnostic_pcm = false;
+    bool diagnostic_silence = false;
+#endif
 };
 
 struct DebugStatistics {
@@ -144,6 +148,10 @@ public:
     bool PollLocalCaptureResult(LocalPcmCaptureResult& result);
     void CancelLocalCapture(uint32_t request_id);
 #endif
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    bool PlayDiagnosticPcm(const int16_t* pcm, size_t samples, uint32_t& played);
+    bool IsDiagnosticPcmBusy();
+#endif
 
 private:
     AudioCodec* codec_ = nullptr;
@@ -182,6 +190,14 @@ private:
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_testing_queue_;
     std::deque<std::unique_ptr<AudioTask>> audio_encode_queue_;
     std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
+#if CONFIG_COMPANION_GEMINI_VOICE_PROBE
+    bool output_in_progress_ = false;
+    bool decode_in_progress_ = false;
+    bool diagnostic_playback_ = false;
+    bool diagnostic_error_ = false;
+    bool diagnostic_abandoned_ = false;
+    uint32_t diagnostic_written_ = 0;
+#endif
     // For server AEC
     std::deque<uint32_t> timestamp_queue_;
 

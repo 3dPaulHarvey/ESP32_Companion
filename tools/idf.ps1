@@ -2,7 +2,7 @@ param(
     [ValidateSet('build', 'flash', 'monitor', 'reconfigure', 'merge-bin')]
     [string]$Action = 'build',
     [string]$Port = 'COM26',
-    [ValidateSet('baseline', 'diagnostics', 'session', 'gemini')]
+    [ValidateSet('baseline', 'diagnostics', 'session', 'gemini', 'voice')]
     [string]$Profile = 'baseline'
 )
 
@@ -14,8 +14,8 @@ if (-not (Test-Path -LiteralPath $activation)) {
     throw "ESP-IDF v5.5.2 activation script missing: $activation"
 }
 . $activation
-if ($Profile -in @('session', 'gemini') -and $Action -eq 'flash') {
-    if ($Port -ne 'COM26') { throw 'The session and Gemini profiles may be flashed only to the development board on COM26.' }
+if ($Profile -in @('session', 'gemini', 'voice') -and $Action -eq 'flash') {
+    if ($Port -ne 'COM26') { throw 'Cloud diagnostic profiles may be flashed only to the development board on COM26.' }
     $identityOutput = & "$env:IDF_PYTHON_ENV_PATH\Scripts\python.exe" -m esptool --chip esp32s3 --port $Port read_mac 2>&1
     if ($LASTEXITCODE -ne 0 -or ($identityOutput -join "`n") -notmatch '(?i)MAC: 44:bd:8d:ec:38:e0') {
         throw 'COM26 does not match the verified development ESP32; flash cancelled.'
@@ -37,6 +37,10 @@ try {
         $idfArguments = @('-B', 'build-gemini', '-DIDF_TARGET=esp32s3',
             '-DSDKCONFIG=sdkconfig.gemini.generated',
             '-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.baseline;config/diagnostics.defaults;config/session.defaults;config/gemini.defaults')
+    } elseif ($Profile -eq 'voice') {
+        $idfArguments = @('-B', 'build-voice', '-DIDF_TARGET=esp32s3',
+            '-DSDKCONFIG=sdkconfig.voice.generated',
+            '-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.baseline;config/diagnostics.defaults;config/session.defaults;config/gemini.defaults;config/voice.defaults')
     }
     if ($Action -in @('flash', 'monitor')) {
         $idfArguments += @('-p', $Port)

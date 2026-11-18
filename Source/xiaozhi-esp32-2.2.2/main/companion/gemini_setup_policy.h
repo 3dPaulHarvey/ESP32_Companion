@@ -42,6 +42,7 @@ enum class PieceResult { Pending, Message, Control, Invalid };
 // Control frames may appear between fragmented data frames without losing data.
 class FrameTracker {
 public:
+    explicit constexpr FrameTracker(std::size_t limit = kMessageLimit) : limit_(limit) {}
     constexpr bool Begin(unsigned opcode, bool fin, std::size_t length) {
         if (active_ || message_ready_) return false;
         const bool control = opcode == 8 || opcode == 9 || opcode == 10;
@@ -52,7 +53,7 @@ public:
             if (opcode == 0) { if (!fragmented_) return false; }
             else if (opcode == 1 || opcode == 2) { if (fragmented_) return false; }
             else return false;
-            if (length > kMessageLimit - message_size_) return false;
+            if (message_size_ > limit_ || length > limit_ - message_size_) return false;
         }
         active_ = true; control_ = control; opcode_ = opcode; fin_ = fin; left_ = length;
         return true;
@@ -77,6 +78,7 @@ public:
     constexpr std::size_t control_size() const { return control_size_; }
     constexpr void ResetMessage() { message_size_ = 0; message_ready_ = false; fragmented_ = false; }
 private:
+    std::size_t limit_;
     std::size_t left_ = 0, message_size_ = 0, control_size_ = 0;
     unsigned opcode_ = 0;
     bool active_ = false, control_ = false, fin_ = false, fragmented_ = false, message_ready_ = false;
