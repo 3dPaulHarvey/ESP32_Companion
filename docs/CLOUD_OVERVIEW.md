@@ -1,6 +1,6 @@
 # Cloudflare and Gemini: the next stage
 
-The local hardware interaction has a successful physical follow-up. Hosted health, device authentication, shared request limits, Gemini temporary-token issuance and a desktop Gemini connection are verified. [Run the Worker](CLOUD_WORKER.md) or [repeat the Gemini session check](GEMINI_SESSIONS.md). No API key is needed for the public health check.
+The local hardware interaction has a successful physical follow-up. Hosted health, device authentication, shared request limits, temporary-token issuance, desktop audio exchange and the ESP32's direct Gemini setup/close are verified. [Current ESP32 checkpoint](ESP32_GEMINI_SETUP.md). No API key is needed for the public health check.
 
 A **Cloudflare Worker** is a small program hosted by Cloudflare that responds to requests. We will use it as the robot's authentication/session endpoint; there is no virtual server for you to maintain. [Cloudflare Workers overview](https://developers.cloudflare.com/workers/)
 
@@ -26,6 +26,7 @@ We will verify the cloud stage in small steps:
 5. **Done hosted:** store the Gemini key as a Worker Secret and verify temporary-token issuance.
 6. **Desktop audio exchange done:** Gemini accepts the desktop setup, and the user confirms both the first spoken reply and a correct answer to a prerecorded 16 kHz question. [Audio exchange results](DESKTOP_AUDIO.md).
 7. **ESP32 session request done:** COM26 authenticates with the Worker and validates a temporary session response; local behavior and reboot persistence pass. [ESP32 session results](ESP32_SESSIONS.md).
-8. Next add the ESP32's direct Gemini WebSocket, then bounded audio transport and microphone checks.
+8. **ESP32 direct setup done:** COM26 verifies Google's WebSocket upgrade, setup acknowledgment and clean closure with a temporary token. Six consecutive final checks and the user's local behavior check pass. [ESP32 Gemini results](ESP32_GEMINI_SETUP.md).
+9. Next play a fixed Gemini reply through the robot's speaker, then add bounded audio input and microphone checks.
 
 Google currently lists free-tier Gemini 3.8 Live input/output, and the user reports a Free-tier project. The successful session check proves access at this checkpoint, not remaining quota. Review the project usage view before longer tests. The Worker handles small control requests; the intended voice stream runs directly between the ESP32 and Gemini. [Session results and limitations](GEMINI_SESSIONS.md).

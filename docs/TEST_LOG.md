@@ -417,3 +417,38 @@ The first build exposed an ESP-IDF component-discovery issue: configuration-depe
 Final application SHA256: `acfd56d8a4c69081a98876be4127efcb1a3feb18699ce937ecc01a21d14f7d8c`. Configuration/app metadata: `logs/esp32-session-build-metadata.json`. Other evidence: `esp32-session-build-final.log`, `esp32-session-flash-final.log`, `esp32-session-hardware-verified.log`, `esp32-session-host-unit-tests.json`, `esp32-session-physical-followup.json` and `esp32-session-diagnostics-regression-build.log`. Host logs contain only controlled statuses/timings/heap metadata; raw serial output is not saved. Production Worker source/deployment and dependency lock are unchanged.
 
 **Phase 4a control-request checkpoint passed on the ESP32.** The temporary response is discarded rather than used to connect to Gemini. Forced device 429/recovery, extended memory soak, direct WebSocket setup and live audio remain later checks. The existing shared backend limit was already verified in Phase 3c. Development credential storage uses ordinary NVS; this profile does not add encryption at rest. Microphone headroom and capture duration remain open before voice streaming. See [ESP32_SESSIONS.md](ESP32_SESSIONS.md).
+
+## 2026-11-17 - Phase 4b: direct ESP32 Gemini setup and closure verified
+
+Saved the Phase 4a checkpoint at `14d8567` / `phase-4a-esp32-session-verified` and worked on `work/phase-4b-esp32-gemini-setup`. COM26 again matched development MAC `44:bd:8d:ec:38:e0`; no other board was opened or flashed. Before changing its firmware, saved `recovery/2026-11-17-phase-4b/before-gemini-full-flash.bin`, verified as 8,388,608 bytes / SHA256 `9550a5988dee3a54b64dd0ffaf9175632af4f3e711cb4e4e67f3f9ef84d38e0e`. This private backup includes the provisioned NVS credential. The original November 9 backup was not overwritten.
+
+Added an opt-in `gemini` profile with its own build/configuration output and the existing COM26/MAC flash guard. Serial `j` obtains a fresh temporary credential through the verified Worker contract, releases the Worker HTTP/TLS client, opens the fixed Google constrained WebSocket, sends the fixed model setup, waits for `setupComplete`, sends normal Close and requires its acknowledgment. The response buffer owns the borrowed temporary credential until transport cleanup. No question, microphone samples, tools or session-resumption messages are sent. Wake remains local, Wi-Fi starts off, and no automatic retry is introduced.
+
+Used the pinned ESP-IDF WebSocket/TLS transports without adding a dependency. CA/hostname/date verification remains enabled, only HTTP 101 is accepted, redirects are not followed, and reserved characters in the token query are percent-encoded. The SDK masks outgoing buffers in place, so all passed payloads use writable storage. Bounded frame tracking handles partial reads, fragmentation and interleaved control frames; messages are limited to 16 KiB and controls to 125 bytes. Owned private buffers are cleared and both transports destroyed before a success result is emitted. SDK-owned copies are normally freed rather than promised to be forensically erased.
+
+The local SDK audit found an ERROR log that can print the complete credential-bearing upgrade request. In this profile CMake compiles logging out of all five `tcp_transport` units; a runtime tag suppression provides a second guard. Compile commands and the application image were checked to confirm that suppression and absence of the unsafe request-dump strings. The real device credential is also absent from the image. The host rejects sensitive transport markers and device-fault output without saving raw serial data. The permanent Gemini API key remains only in the existing Worker Secret.
+
+Initial real connections reached HTTP 101 and a 26-byte setup acknowledgment, but the checker treated an additional data message arriving after Close as an invalid setup response. Added bounded draining of in-flight data after our Close, without accepting it as a close acknowledgment. The first repeated run then completed two cycles and failed a third; that early checker did not retain the failing stage metadata, so its exact cause is unclassified. Improved the checker to preserve controlled failure metadata. A complete run and a separate short repeat then passed **six consecutive** direct cycles; the intermittent failure did not recur. Extended stability/network-fault testing remains open.
+
+| Final check | Observed result |
+|---|---|
+| Build/flash | PASS: 2,563,024-byte application, 17% app-partition space free; guarded flash hashes verified |
+| Compile-time policy | PASS: 24 session/provisioning assertions plus 16 URI/setup/frame assertions |
+| Offline host tests | PASS: seven session identity/privacy/fault/bounds tests and six direct-result gate tests |
+| Pre-flash security | PASS: secure TLS/date/name configuration, five transport units with logging compiled out, unsafe request logs and real device credential absent from image |
+| Wi-Fi-off guard | PASS before and after online checks: local HTTP 0 / wifi_required, no connection attempt |
+| Authentication regression | PASS: wrong credential 401 in 2,971 ms; missing credential 401 in 2,446 ms |
+| Session-only regression | PASS: valid 200 and exact session contract in 2,750 ms |
+| Direct upgrade/setup/close | PASS six times: HTTP 101, setup acknowledgment 26 bytes, close sent/acknowledged, server close code 1000 |
+| Direct transport times | 2,237 / 1,927 / 2,240 / 1,955 / 1,915 / 1,925 ms, excluding Worker request time |
+| Concurrent local work | PASS: one exact 32,000-sample/64,000-byte local capture/cue/idle cycle while connecting; duplicate j command rejected as busy |
+| Offline recovery | PASS: Wi-Fi shutdown followed by local capture/cue/idle recovery |
+| Quiet reboot | PASS: Wi-Fi off, credential retained, no automatic cloud request |
+| Physical follow-up | PASS: user reports eyes, wake, listening and cue all work after the final reboot |
+| Memory observations | Lowest internal free watermark 53,743 bytes; active-Wi-Fi snapshots 74,971-86,639 bytes free; no detected panic in these short runs |
+| Earlier profile | PASS: session-only regression build; not flashed over Gemini |
+| Cloud/dependencies | Worker source/deployment and dependency versions unchanged; no repeat of the unchanged 20 Worker test groups needed |
+
+Final application SHA256: `892a7c5ebd62dc581374e007a424727aaa7881e4528edeaa11ac4a30ebf4405a`. Evidence: ignored `logs/esp32-gemini-setup-build-close-drain.log`, `esp32-gemini-setup-flash-close-drain.log`, `esp32-gemini-setup-preflash.json`, `esp32-gemini-setup-hardware-verified.log`, `esp32-gemini-setup-short-repeat.log`, `esp32-gemini-setup-host-tests.json`, `esp32-gemini-setup-physical-followup.json`, `esp32-gemini-session-regression-build.log` and the controlled initial `esp32-gemini-setup-diagnostic.json`. No raw provider message, credential-bearing URL or serial stream is retained in those result logs.
+
+**Phase 4b setup-only checkpoint passed, including physical follow-up.** The robot still performs its local LISTENING/capture/CUE/READY sequence and gives no spoken cloud answer. Next add bounded playback of a fixed Gemini reply through its speaker. Microphone headroom, the two-second capture duration, live audio transport and extended fault/uptime checks remain open. See [ESP32_GEMINI_SETUP.md](ESP32_GEMINI_SETUP.md).

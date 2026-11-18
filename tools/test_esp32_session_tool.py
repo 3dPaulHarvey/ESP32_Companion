@@ -63,6 +63,12 @@ class SessionHostChecks(unittest.TestCase):
             device.read()
         self.assertNotIn("arbitrary-private-data", str(error.exception))
 
+    def test_a_credential_bearing_transport_url_is_suppressed(self):
+        device = device_with(b"SDK error request ?access_token=public-fixture\n")
+        with self.assertRaises(CheckFailure) as error:
+            device.read()
+        self.assertNotIn("public-fixture", str(error.exception))
+
     def test_serial_output_is_bounded(self):
         device = device_with(b"x" * 500001)
         with self.assertRaises(CheckFailure):

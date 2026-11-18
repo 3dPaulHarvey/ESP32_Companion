@@ -2,7 +2,7 @@
 
 Phase 4a **passed on the development ESP32 on 2026-11-17**. COM26 rejects missing/wrong credentials, receives a valid temporary Gemini session response over certificate-verified HTTPS, and keeps local capture/cue recovery working during the request. The user confirms normal eyes, English wake, listening and cue behavior after flashing.
 
-This is a control-request checkpoint. The firmware validates and discards the temporary response; it does not open Gemini's WebSocket or upload microphone audio yet.
+COM26 has since advanced to [Phase 4b's direct Gemini setup profile](ESP32_GEMINI_SETUP.md). This page preserves the repeatable **session** profile and Phase 4a results: it validates and discards the temporary response without opening Gemini's WebSocket or uploading microphone audio.
 
 ## Current robot behavior
 
@@ -75,4 +75,4 @@ This short run does not establish an extended memory soak, direct Gemini connect
 
 Evidence is in ignored `logs/esp32-session-build-final.log`, `esp32-session-flash-final.log`, `esp32-session-hardware-verified.log`, `esp32-session-build-metadata.json` and `esp32-session-diagnostics-regression-build.log`. The full pre-change flash backup is preserved at `recovery/2026-11-17-phase-4a/before-session-full-flash.bin`, verified as 8,388,608 bytes with SHA256 `b9402e8fd52be5176e8cd421837098fc1d8e4f5eee6807b86ef933f1b7e68f9a`. The original November 9 backup remains preserved separately.
 
-Next: open the direct Gemini constrained WebSocket on the ESP32 with a temporary token and verify setup acknowledgment/cleanup, then add bounded audio exchange. Keep the local diagnostics and recovery paths available throughout.
+The next setup acknowledgment/cleanup checkpoint is now [verified in Phase 4b](ESP32_GEMINI_SETUP.md). Bounded speaker output and audio input follow; keep the local diagnostics and recovery paths available throughout.

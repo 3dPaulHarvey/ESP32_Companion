@@ -40,6 +40,8 @@ To build or flash local diagnostics, add `-Profile diagnostics` to the wrapper c
 
 **Phase 3f prerecorded audio exchange is verified:** a 16 kHz synthetic question received the correct spoken answer at 24 kHz, with clear playback confirmed by the user. Six offline desktop-client tests pass. [Audio question, replay and results](docs/DESKTOP_AUDIO.md).
 
-**Phase 4a ESP32 session requests are verified:** the `session` profile is flashed on COM26, private device-credential provisioning and HTTPS rejection/success checks pass, and local capture/cue recovery works during a request. The user confirms eyes, wake, listening and cue. Wi-Fi stays off at boot; wake remains local. Direct Gemini WebSocket/audio transport is next. [Firmware behavior, commands and results](docs/ESP32_SESSIONS.md).
+**Phase 4a ESP32 session requests are verified:** private device-credential provisioning and HTTPS rejection/success checks pass, and local capture/cue recovery works during a request. [Session-only profile and results](docs/ESP32_SESSIONS.md).
+
+**Phase 4b direct ESP32 Gemini setup is verified:** COM26 now runs the `gemini` profile. Six consecutive final connections verify setup acknowledgment and clean closure; concurrent local capture, offline recovery and the user's eyes/wake/listening/cue check pass. Wi-Fi stays off at boot and wake remains local. Spoken Gemini output is next. [Current firmware behavior, commands and results](docs/ESP32_GEMINI_SETUP.md).
 
 Based on [TechTalkies/Xiaozhi-for-XiaoESP32S3](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3), preserving the supplied licenses and attribution.

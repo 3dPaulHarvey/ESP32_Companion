@@ -47,6 +47,9 @@ endif()
 if(CONFIG_COMPANION_SESSION_PROBE)
     list(APPEND SOURCES "companion/session_probe.cc" "../tests/companion_session_policy_test.cpp")
 endif()
+if(CONFIG_COMPANION_GEMINI_SETUP_PROBE)
+    list(APPEND SOURCES "companion/gemini_setup.cc" "../tests/companion_gemini_policy_test.cpp")
+endif()
 
 # Add board common files
 list(APPEND SOURCES
@@ -837,7 +840,16 @@ idf_component_register(SRCS ${SOURCES}
                         bt
                         esp_http_client
                         mbedtls
+                        tcp_transport
                     )
+
+if(CONFIG_COMPANION_GEMINI_SETUP_PROBE)
+    # transport_ws has an error path that prints the upgrade request, including
+    # the temporary access_token. Remove transport logging from this build.
+    idf_component_get_property(COMPANION_TRANSPORT_LIB tcp_transport COMPONENT_LIB)
+    target_compile_definitions(${COMPANION_TRANSPORT_LIB} PRIVATE LOG_LOCAL_LEVEL=0)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE COMPANION_WS_LOGS_DISABLED=1)
+endif()
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
 # If BOARD_NAME is empty, use BOARD_TYPE

@@ -45,6 +45,8 @@ class Device:
             raise CheckFailure("Serial output exceeded the bounded check.")
         if self.credential and self.credential in self.text:
             raise CheckFailure("The device echoed a credential; its output has been suppressed.")
+        if any(marker in self.text for marker in ["access_token=", "auth_tokens/", "auth_tokens%2F", "Authorization: Bearer"]):
+            raise CheckFailure("Sensitive transport output appeared; its contents have been suppressed.")
         if any(marker in self.text for marker in ["Guru Meditation", "assert failed:", "Brownout detector", "Stack canary watchpoint"]):
             raise CheckFailure("A device fault occurred; raw serial output has been suppressed.")
 

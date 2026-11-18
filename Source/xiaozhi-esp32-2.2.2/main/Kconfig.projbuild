@@ -19,6 +19,14 @@ config COMPANION_SESSION_PROBE
         credential is provisioned privately over USB into NVS. Wi-Fi stays off
         at boot and wake words remain local. No voice or audio is uploaded.
 
+config COMPANION_GEMINI_SETUP_PROBE
+    bool "Companion direct Gemini setup check"
+    depends on COMPANION_SESSION_PROBE
+    default n
+    help
+        Add a manual secure WebSocket setup/close check using a fresh temporary
+        session credential. No question or microphone audio is sent.
+
 config OTA_URL
     string "Default OTA URL"
     default "https://api.tenclass.net/xiaozhi/ota/"

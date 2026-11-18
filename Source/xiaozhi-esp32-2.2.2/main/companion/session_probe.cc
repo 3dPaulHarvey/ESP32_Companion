@@ -1,5 +1,8 @@
 #include "session_probe.h"
 #include "session_policy.h"
+#if CONFIG_COMPANION_GEMINI_SETUP_PROBE
+#include "gemini_setup.h"
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -32,8 +35,10 @@ constexpr char kTag[] = "CompanionSession";
 constexpr char kUrl[] = "https://esp32-companion-control.stiener.workers.dev/device/session";
 constexpr char kNamespace[] = "companion";
 constexpr char kCredentialKey[] = "device_auth";
-enum class Kind { Session, Wrong, Missing };
-const char* KindName(Kind kind) { return kind == Kind::Session ? "session" : kind == Kind::Wrong ? "wrong" : "missing"; }
+enum class Kind { Session, Wrong, Missing, Gemini };
+const char* KindName(Kind kind) {
+    return kind == Kind::Session ? "session" : kind == Kind::Wrong ? "wrong" : kind == Kind::Missing ? "missing" : "gemini";
+}
 std::atomic<bool> busy{false};
 std::atomic<std::int64_t> retry_until_us{0};
 Kind pending_kind = Kind::Session;
@@ -101,7 +106,11 @@ struct HttpClient {
     }
 };
 struct ResponseBody {
-    char* data = static_cast<char*>(heap_caps_calloc(1, companion_session::kBodyLimit + 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    char* data = nullptr;
+    bool Allocate() {
+        data = static_cast<char*>(heap_caps_calloc(1, companion_session::kBodyLimit + 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        return data != nullptr;
+    }
     ~ResponseBody() {
         if (data) { mbedtls_platform_zeroize(data, companion_session::kBodyLimit + 2); heap_caps_free(data); }
     }
@@ -115,6 +124,9 @@ struct Result {
     int http_status = 0;
     const char* reason = "unavailable";
     companion_session::SessionMetadata metadata{};
+#if CONFIG_COMPANION_GEMINI_SETUP_PROBE
+    CompanionGeminiSetup::Result gemini{};
+#endif
 };
 
 bool EnsureTime() {
@@ -128,15 +140,14 @@ bool EnsureTime() {
     return error == ESP_OK && std::time(nullptr) >= 1735689600;
 }
 
-Result Perform(Kind kind) {
+Result FetchSession(Kind kind, ResponseBody& body, std::string_view& temporary) {
     Result result;
     if (!WifiManager::GetInstance().IsConnected()) { result.reason = "wifi_required"; return result; }
     Credential credential;
     if (kind != Kind::Missing && !LoadCredential(credential)) { result.reason = "credential_required"; return result; }
     if (!EnsureTime()) { result.reason = "time_sync_failed"; return result; }
     ESP_LOGI(kTag, "TIME ready certificate_dates=verified");
-    ResponseBody body;
-    if (!body.data) { result.reason = "allocation_failed"; return result; }
+    if (!body.Allocate()) { result.reason = "allocation_failed"; return result; }
     Headers headers;
     esp_http_client_config_t config{};
     config.url = kUrl;
@@ -179,7 +190,7 @@ Result Perform(Kind kind) {
         if (seconds >= 1 && seconds <= 60) retry_until_us.store(esp_timer_get_time() + seconds * 1000000LL);
         result.reason = "rate_limited"; return result;
     }
-    const int expected = kind == Kind::Session ? 200 : 401;
+    const int expected = kind == Kind::Wrong || kind == Kind::Missing ? 401 : 200;
     if (result.http_status != expected) { result.reason = "unexpected_http_status"; return result; }
     if (!headers.Valid()) { result.reason = "unexpected_headers"; return result; }
     if (length > static_cast<int64_t>(companion_session::kBodyLimit)) { result.reason = "oversized_response"; return result; }
@@ -201,9 +212,9 @@ Result Perform(Kind kind) {
         }
     }
     const std::string_view payload(body.data, used);
-    if (kind == Kind::Session) {
+    if (kind == Kind::Session || kind == Kind::Gemini) {
         if (!companion_session::ValidateSession(payload, static_cast<int64_t>(std::time(nullptr)) * 1000,
-                std::string_view(credential.value, 64), result.metadata)) {
+                std::string_view(credential.value, 64), result.metadata, &temporary)) {
             result.reason = "invalid_session_response"; return result;
         }
     } else if (payload != "{\"error\":\"unauthorized\"}" || std::strcmp(headers.challenge, "Bearer realm=\"esp32-companion\"") != 0) {
@@ -211,6 +222,23 @@ Result Perform(Kind kind) {
     }
     result.ok = true;
     result.reason = "verified";
+    return result;
+}
+
+Result Perform(Kind kind) {
+    ResponseBody body;
+    std::string_view temporary;
+    // HTTP client, its TLS context, device credential and Authorization buffer
+    // are destroyed before a Gemini transport is allocated.
+    auto result = FetchSession(kind, body, temporary);
+#if CONFIG_COMPANION_GEMINI_SETUP_PROBE
+    if (result.ok && kind == Kind::Gemini) {
+        if (result.metadata.start_in_seconds < 20) { result.ok = false; result.reason = "session_window_too_short"; return result; }
+        result.gemini = CompanionGeminiSetup::Verify(temporary);
+        result.ok = result.gemini.ok;
+        result.reason = result.gemini.reason;
+    }
+#endif
     return result;
 }
 
@@ -224,13 +252,21 @@ void Request(Kind kind) {
         const auto started = esp_timer_get_time();
         ESP_LOGI(kTag, "REQUEST_BEGIN kind=%s no_audio_upload=1", KindName(kind));
         const auto result = Perform(kind);
+#if CONFIG_COMPANION_GEMINI_SETUP_PROBE
+        if (kind == Kind::Gemini) {
+            ESP_LOGI("CompanionGemini", "RESULT ok=%d upgrade_http=%d setup_ack=%d close_sent=%d close_ack=%d close_code=%u ack_bytes=%u elapsed_ms=%lu cleanup=1 no_question=1 no_audio_upload=1",
+                result.gemini.ok, result.gemini.upgrade_http, result.gemini.setup_ack, result.gemini.close_sent,
+                result.gemini.close_ack, result.gemini.close_code, result.gemini.ack_bytes,
+                static_cast<unsigned long>(result.gemini.elapsed_ms));
+        }
+#endif
         ESP_LOGI(kTag, "RESULT kind=%s ok=%d http=%d reason=%s temporary_bytes=%u start_in_s=%d expires_in_s=%d elapsed_ms=%lu discarded=1",
             KindName(kind), result.ok, result.http_status, result.reason,
             static_cast<unsigned>(result.metadata.temporary_bytes), result.metadata.start_in_seconds,
             result.metadata.expires_in_seconds, static_cast<unsigned long>((esp_timer_get_time() - started) / 1000));
         busy.store(false);
         vTaskDelete(nullptr);
-    }, "session_probe", 12288, nullptr, 1, nullptr);
+    }, "session_probe", kind == Kind::Gemini ? 16384 : 12288, nullptr, 1, nullptr);
     if (created != pdPASS) { busy.store(false); ESP_LOGE(kTag, "REQUEST_REJECTED reason=task_allocation_failed"); }
 }
 }  // namespace
@@ -239,6 +275,10 @@ namespace CompanionSessionProbe {
 void Initialize() {
     ESP_LOGI(kTag, "MODE manual-session-probe no_audio_upload=1 automatic_requests=0");
     ESP_LOGI(kTag, "COMMANDS g=session-check b=wrong-credential-check u=missing-credential-check provision=private-host-tool");
+#if CONFIG_COMPANION_GEMINI_SETUP_PROBE
+    CompanionGeminiSetup::Initialize();
+    ESP_LOGI(kTag, "COMMANDS j=direct-Gemini-setup-check");
+#endif
     PrintStatus();
 }
 void PrintStatus() {
@@ -247,6 +287,9 @@ void PrintStatus() {
     Credential credential;
     ESP_LOGI(kTag, "PROTOCOL version=1 mac=%02x:%02x:%02x:%02x:%02x:%02x configured=%d busy=%d",
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], LoadCredential(credential), busy.load());
+#if CONFIG_COMPANION_GEMINI_SETUP_PROBE
+    ESP_LOGI(kTag, "FEATURES gemini_setup=1 automatic_requests=0 audio_upload=0");
+#endif
 }
 void Poll(std::int64_t now_us) {
     if (provision_frame.Expire(now_us)) ESP_LOGW(kTag, "PROVISION ok=0 reason=frame_timeout");
@@ -264,6 +307,9 @@ bool HandleSerialByte(char byte, std::int64_t now_us) {
     if (byte == 'g') { Request(Kind::Session); return true; }
     if (byte == 'b') { Request(Kind::Wrong); return true; }
     if (byte == 'u') { Request(Kind::Missing); return true; }
+#if CONFIG_COMPANION_GEMINI_SETUP_PROBE
+    if (byte == 'j') { Request(Kind::Gemini); return true; }
+#endif
     return false;
 }
 }  // namespace CompanionSessionProbe

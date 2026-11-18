@@ -60,6 +60,14 @@ constexpr bool TimeoutDrainsInput() {
     return frame.Feed('\n', 5000002) == ProvisionEvent::Invalid && frame.Feed('g', 5000003) == ProvisionEvent::NotHandled;
 }
 
+constexpr bool BorrowedViewHasOwner() {
+    SessionMetadata result;
+    std::string_view temporary;
+    if (!ValidateSession(kResponse, kNow, kCredential, result, &temporary) || temporary != "auth_tokens/public-test-fixture") return false;
+    if (temporary.data() != kResponse + std::string_view(kResponse).find("auth_tokens/")) return false;
+    return !ValidateSession(kResponse, kNow + 60000, kCredential, result, &temporary) && temporary.empty();
+}
+
 static_assert(TimestampMs("2026-01-01T00:00:00.000Z") == kNow);
 static_assert(TimestampMs("2028-02-29T12:34:56.123Z") > 0);
 static_assert(TimestampMs("2026-02-29T00:00:00.000Z") == -1);
@@ -83,4 +91,5 @@ static_assert(RejectDuplicate() && RejectOversize());
 static_assert(FrameValidAndCleared());
 static_assert(RejectFrame(63, false) && RejectFrame(65, false) && RejectFrame(64, true));
 static_assert(TimeoutDrainsInput());
+static_assert(BorrowedViewHasOwner());
 }  // namespace

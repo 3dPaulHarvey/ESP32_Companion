@@ -84,8 +84,10 @@ private:
 };
 
 constexpr bool ValidateSession(std::string_view body, std::int64_t now_ms,
-                               std::string_view device_credential, SessionMetadata& result) {
+                               std::string_view device_credential, SessionMetadata& result,
+                               std::string_view* borrowed_temporary = nullptr) {
     result = {};
+    if (borrowed_temporary) *borrowed_temporary = {};
     if (body.empty() || body.size() > kBodyLimit || now_ms < 1735689600000LL) return false;
     FlatJson json(body);
     if (!json.Take('{')) return false;
@@ -114,6 +116,8 @@ constexpr bool ValidateSession(std::string_view body, std::int64_t now_ms,
     result.temporary_bytes = temporary.size();
     result.start_in_seconds = static_cast<int>((start_ms - now_ms) / 1000);
     result.expires_in_seconds = static_cast<int>((expire_ms - now_ms) / 1000);
+    // This view is valid only while the caller owns the response buffer.
+    if (borrowed_temporary) *borrowed_temporary = temporary;
     return true;
 }
 

@@ -2,9 +2,9 @@
 
 Use the development unit on **COM26**. Leave the original working robot separate.
 
-COM26 currently runs the [manual session-check profile](ESP32_SESSIONS.md), which retains the local wake/listen/cue sequence and Wi-Fi-off startup. Use the separate [local diagnostics profile](DIAGNOSTICS.md) for checks without the session module. Normal baseline commands below restore the original application behavior with English wake.
+COM26 currently runs the [manual Gemini setup-check profile](ESP32_GEMINI_SETUP.md), which retains the local wake/listen/cue sequence and Wi-Fi-off startup. Use the separate [local diagnostics profile](DIAGNOSTICS.md) for checks without the session module. Normal baseline commands below restore the original application behavior with English wake.
 
-Build/flash the current control-only increment with `-Profile session`. Its wrapper verifies the development MAC on COM26 before flashing, and it uses separate `build-session/` and generated configuration files. The original backups and `build-diagnostics/` remain available. The session profile's NVS credential survives normal application flashing; a full pre-session flash restore returns NVS to that backup's earlier state.
+Build/flash the current setup-only increment with `-Profile gemini`. Its wrapper verifies the development MAC on COM26 before flashing, and it uses separate `build-gemini/` and generated configuration files. The preceding [session-only profile](ESP32_SESSIONS.md) remains available with `-Profile session` and `build-session/`. The original backups and `build-diagnostics/` remain available. The device's NVS credential survives normal application flashing; a full flash restore returns NVS to that backup's earlier state.
 
 ## Pinned setup
 
