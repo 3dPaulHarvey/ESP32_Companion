@@ -1,11 +1,11 @@
 # First manual microphone question
 
-2026-11-18: COM26 runs the **question** profile with reviewed microphone settings. Build, framing, host-app and local cancellation/recovery checks pass. **The actual spoken Gemini answer still needs the user's test.** Wake-triggered cloud conversation is a later step.
+2026-11-18: COM26 runs the **question** profile with reviewed microphone settings. Clock freshness and audio-input metadata handling were corrected after the first live attempts. A prerecorded question now passes the full ESP32 upload/reply/playback/READY path. **Live microphone answer confirmation still needs the user's retest.** Wake-triggered cloud conversation is a later step.
 
 ## Run when back at the robot
 
 1. Connect the development robot on COM26 and close serial monitors. Open **Robot Spoken Question Test** on the Desktop, or **Open Robot Question Test.cmd** in the project.
-2. Click **Connect robot**. The app verifies the development MAC, checks capture shift 15, connects the robot's saved Wi-Fi, and pauses incidental wake recognition. It opens no Gemini session yet.
+2. Click **Connect robot**. The app verifies the development MAC, checks capture shift 15, connects saved Wi-Fi, and completes a Gemini setup/close check before enabling Start. This preflight sends no question or microphone audio. It then pauses incidental wake recognition between samples.
 3. From 1–2 feet away in a quiet room, click **Start question**. Wait for the countdown and green **SPEAK NOW**, then say **“What is two plus two?”** once at normal volume.
 4. Stop at the local end cue. The robot shows CONNECTING, receives a reply, shows SPEAKING while playing it, then returns to READY.
 5. Choose **Yes — clear answer: four** only if you heard a correct answer at normal speed and saw READY. Otherwise select **Answer or audio problem**. Click **Finish & close** and tell Codex the test is finished.
@@ -28,7 +28,9 @@ Only explicit serial **q** can retain a question capture. The existing input tas
 
 After the end cue, the session task obtains a fresh temporary token through the existing Worker, opens the verified constrained Gemini WebSocket, and sends **100 PCM frames of 640 samples / 40 ms**, followed by `audioStreamEnd`. Incoming messages and ping/close controls are processed during upload. Input and base64 workspaces are wiped; the input allocation is released immediately after EOF, or on any earlier failure. This uses the existing server-side activity detection and EOF signal. [Google's realtime input fields](https://googleapis.github.io/js-genai/release_docs/interfaces/types.LiveClientRealtimeInput.html).
 
-The established reply validator still enforces 24 kHz mono PCM, complete nonempty output, normal closure, a ten-second/480,000-byte audio bound, and exact playback counts. The cloud connection closes before playback. The output task remains the sole speaker writer, and wake waits for settling. Setup, upload, reply, closure and playback all have finite deadlines. A failed request never retries automatically. Worker code, key storage, dependency versions and TLS checks are unchanged.
+The established reply validator still enforces 24 kHz mono PCM, complete nonempty output, normal closure, a ten-second/480,000-byte audio bound, and exact playback counts. Documented voice-activity notices are ignored as bounded metadata. Audio-question input transcription is type-checked and discarded without logging or saving its text; it does not finish a turn or append playable audio. The fixed-greeting mode still rejects unexpected input transcription. [Google's server message fields](https://aistudio.google.com/api-reference/live#BidiGenerateContentServerMessage).
+
+The cloud connection closes before playback. The output task remains the sole speaker writer, and wake waits for settling. Setup, upload, reply, closure and playback all have finite deadlines. Every temporary-session request requires a fresh bounded time synchronization; a plausible RTC date alone is insufficient for a one-minute start deadline. A failed request never retries automatically. Worker code, key storage, dependency versions and TLS checks are unchanged.
 
 ```powershell
 .\tools\idf.ps1 -Action build -Profile question
@@ -38,4 +40,22 @@ python .\tools\test_robot_question.py
 
 The flash wrapper verifies the development MAC. `question` uses separate `build-question/` and `sdkconfig.question.generated`; `microphone` remains the local-only alternative. Both now seed shift 15. Existing generated configurations are not overwritten by default files; the local microphone configuration was explicitly updated before its regression build.
 
-Unattended hardware checks verified offline/held-control rejection, early cancellation, busy guards, retained-input discard when Wi-Fi disappears before upload, subsequent ordinary capture, and idle/wake recovery. The real question-app adapter also connected and closed successfully. These checks made **no provider request and uploaded no room audio**. They establish readiness to perform the user's spoken question, not a completed conversation milestone. [Roadmap](ROADMAP_STATUS.md).
+Initial local-only hardware checks verified offline/held-control rejection, early cancellation, busy guards, retained-input discard when Wi-Fi disappears before upload, subsequent ordinary capture, and idle/wake recovery. Those initial checks made **no provider request and uploaded no room audio**. The later preflight and prerecorded protocol checks are recorded below; live microphone confirmation remains a separate gate. [Roadmap](ROADMAP_STATUS.md).
+
+## Failure investigation and prerecorded regression
+
+Two initial live attempts returned HTTP 200 but failed before WebSocket upgrade. A session-only reproduction failed too, while the hosted response shape was valid. Device-clock diagnostics then measured the ESP32 **216.6 seconds ahead** of the PC; the old plausibility check skipped synchronization and rejected a fresh token's start window. Fresh synchronization restored session validation, Gemini setup and a fixed greeting.
+
+The next live attempt reached upgrade 101 but failed on an unexpected server message. A synthetic desktop probe identified two `voiceActivity` notices; a complete ESP32 prerecorded test also exposed `inputTranscription`. Both are now handled as metadata, with transcript text discarded. These audio-input messages were not exercised by the earlier fixed-text greeting test.
+
+The successful prerecorded ESP32 run sent **128,000 bytes / 100 frames + EOF**, received **194,400 bytes / 97,200 samples**, played **4.050 seconds** in **4.220 seconds** including settling, closed normally and returned to READY. Source output had zero clipped samples. This proves the audio protocol/playback path with synthetic input, not live microphone intelligibility or a human-confirmed answer.
+
+Developer-only repeat procedure, using a verified local System.Speech fixture:
+
+```powershell
+python .\tools\prepare_question_fixture.py
+.\tools\idf.ps1 -Action build -Profile question -FixtureCheck
+.\tools\idf.ps1 -Action flash -Profile question -Port COM26 -FixtureCheck
+```
+
+That temporary diagnostic build adds explicit serial **f**, using synthetic PCM instead of the microphone through the same question transport and speaker path. It is not accepted by the desktop app. Normal build/flash commands explicitly disable the fixture option; the final installed image excludes the f handler and embedded fixture. The passing diagnostic image is archived separately. Close and reopen the Desktop app before the live retest.

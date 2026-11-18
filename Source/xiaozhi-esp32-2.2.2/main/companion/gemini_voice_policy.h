@@ -48,21 +48,24 @@ struct AudioState {
 };
 
 constexpr bool Consume(const JsonDocument& json, std::uint8_t* pcm, std::size_t capacity,
-                       AudioState& state, const char*& reason) {
+                       AudioState& state, const char*& reason, bool input_mode = false) {
     using Type = JsonDocument::Type;
     constexpr auto missing = JsonDocument::kMissing;
     if (!pcm) { reason = "allocation_failed"; return false; }
-    if (state.turn_complete) { reason = "content_after_turn"; return false; }
     for (std::uint16_t key = 1; key < json[0].next; key = json[key + 1].next) {
-        if (json[key].value != "serverContent" && json[key].value != "usageMetadata" && json[key].value != "sessionResumptionUpdate") {
+        if (json[key].value != "serverContent" && json[key].value != "usageMetadata" &&
+            json[key].value != "sessionResumptionUpdate" && json[key].value != "voiceActivity") {
             reason = "unexpected_server_message"; return false;
         }
         if (json[key + 1].type != Type::Object) { reason = "invalid_server_message"; return false; }
     }
     const auto content = json.Find(0, "serverContent");
-    // Gemini may send a resumption-state notice even in a one-turn session.
-    // Its bounded object is ignored; no handle is retained or sent back.
+    // Bounded usage, resumption and voice-activity notices do not contain
+    // playable audio or finish a turn. They may arrive during upload or after
+    // completion while the sender is finishing EOF. No values are retained.
     if (content == missing) return true;
+    if (state.turn_complete && (!input_mode || json.Find(content, "modelTurn") != missing ||
+        json.Find(content, "turnComplete") != missing)) { reason = "content_after_turn"; return false; }
     for (const auto name : {"interrupted", "turnComplete", "generationComplete"}) {
         const auto flag = json.Find(content, name);
         if (flag != missing && json[flag].type != Type::True && json[flag].type != Type::False) {
@@ -71,7 +74,18 @@ constexpr bool Consume(const JsonDocument& json, std::uint8_t* pcm, std::size_t 
     }
     const auto interrupted = json.Find(content, "interrupted");
     if (interrupted != missing && json[interrupted].type == Type::True) { reason = "turn_interrupted"; return false; }
-    if (json.Find(content, "inputTranscription") != missing) { reason = "unexpected_input_transcription"; return false; }
+    const auto transcription = json.Find(content, "inputTranscription");
+    if (transcription != missing) {
+        if (!input_mode) { reason = "unexpected_input_transcription"; return false; }
+        if (json[transcription].type != Type::Object) { reason = "invalid_input_transcription"; return false; }
+        const auto text = json.Find(transcription, "text"), finished = json.Find(transcription, "finished");
+        if ((text != missing && json[text].type != Type::String) ||
+            (finished != missing && json[finished].type != Type::True && json[finished].type != Type::False)) {
+            reason = "invalid_input_transcription"; return false;
+        }
+        // Input transcription is expected with audio questions, but is never
+        // retained, logged, used as a prompt, or treated as turn completion.
+    }
     const auto model = json.Find(content, "modelTurn");
     if (model != missing) {
         if (json[model].type != Type::Object) { reason = "invalid_model_turn"; return false; }

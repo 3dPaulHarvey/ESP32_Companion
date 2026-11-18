@@ -50,4 +50,6 @@ To build or flash local diagnostics, add `-Profile diagnostics` to the wrapper c
 
 **Phase 4e manual question test is ready:** open **Robot Spoken Question Test** on the Desktop or **Open Robot Question Test.cmd** here. Connect, start one question, wait for green and ask “What is two plus two?” Confirm the audible answer and close; results autosave. COM26 runs the `question` profile. Only an explicit Start uploads that capture; normal wake/calibration remain local and Wi-Fi is off at boot. **Actual microphone-to-Gemini answer verification is pending the user's run.** [Instructions](docs/ESP32_QUESTIONS.md). [Roadmap progress](docs/ROADMAP_STATUS.md).
 
+The first live failures exposed a fast device clock and unsupported audio-input metadata. Both are corrected. Connect now validates Gemini setup before recording; a prerecorded question passes the full ESP32 upload/reply/speaker/READY path. Close and reopen the Desktop test for the live retest.
+
 Based on [TechTalkies/Xiaozhi-for-XiaoESP32S3](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3), preserving the supplied licenses and attribution.

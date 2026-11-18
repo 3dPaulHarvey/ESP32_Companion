@@ -421,6 +421,18 @@ const char* WifiEventName(WifiEvent event) {
 #endif
             switch (command) {
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+#if COMPANION_QUESTION_FIXTURE
+                case 'f':
+                    if (!manual_voice_active && !calibration_lease.held() && !capture_request_pending &&
+                        cycle.state() == LocalCompanionState::Idle && audio.IsIdle() && CompanionSessionProbe::RequestQuestionFixture()) {
+                        manual_voice_active = true; manual_question_active = true; manual_voice_speaking = false;
+                        audio.EnableWakeWordDetection(false); wake_armed = false;
+                        SetFace(display, FaceState::Idle, "connecting/synthetic-fixture", "CONNECTING");
+                        ESP_LOGI("CompanionQuestion", "FIXTURE_BEGIN microphone=0 public_question=1");
+                        ESP_LOGI("CompanionQuestion", "UI state=CONNECTING wake_armed=0");
+                    }
+                    break;
+#endif
                 case 'q':
                     if (manual_voice_active || question_capture || calibration_lease.held() || capture_request_pending ||
                         cycle.state() != LocalCompanionState::Idle || CompanionSessionProbe::IsBusy() || !audio.IsIdle()) {

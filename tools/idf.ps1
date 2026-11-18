@@ -3,10 +3,12 @@ param(
     [string]$Action = 'build',
     [string]$Port = 'COM26',
     [ValidateSet('baseline', 'diagnostics', 'session', 'gemini', 'voice', 'microphone', 'question')]
-    [string]$Profile = 'baseline'
+    [string]$Profile = 'baseline',
+    [switch]$FixtureCheck
 )
 
 $ErrorActionPreference = 'Stop'
+if ($FixtureCheck -and $Profile -ne 'question') { throw 'The synthetic fixture is restricted to the question diagnostic profile.' }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $firmwareRoot = Join-Path $projectRoot 'Source\xiaozhi-esp32-2.2.2'
 $activation = 'C:\Espressif\tools\Microsoft.v5.5.2.PowerShell_profile.ps1'
@@ -47,6 +49,8 @@ try {
         $idfArguments = @('-B', "build-$Profile", '-DIDF_TARGET=esp32s3',
             "-DSDKCONFIG=sdkconfig.$Profile.generated", "-DSDKCONFIG_DEFAULTS=$captureDefaults")
     }
+    $fixtureOption = if ($FixtureCheck) { 'ON' } else { 'OFF' }
+    $idfArguments += "-DCOMPANION_QUESTION_FIXTURE=$fixtureOption"
     if ($Action -in @('flash', 'monitor')) {
         $idfArguments += @('-p', $Port)
     }

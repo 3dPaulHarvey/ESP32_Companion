@@ -10,7 +10,7 @@ import sys
 from unittest import mock
 
 from robot_question_client import QuestionDevice, question_metadata, CheckFailure
-from robot_question_test import QuestionApp
+from robot_question_test import QuestionApp, DemoQuestion
 from test_esp32_voice_tool import VALID
 from test_esp32_session_tool import FakeSerial
 
@@ -42,9 +42,10 @@ class QuestionChecks(unittest.TestCase):
     def test_only_verified_board_can_start_upload(self):
         d = QuestionDevice(lambda *args: None, threading.Event(), threading.Event())
         d.connection = FakeSerial()
-        with self.assertRaises(CheckFailure): d.send(b"q")
+        for data in [b"q", b"j"]:
+            with self.assertRaises(CheckFailure): d.send(data)
         d.trusted = True
-        for data in [b"~credential", b"g", b"j", b"v"]:
+        for data in [b"~credential", b"g", b"v"]:
             with self.assertRaises(CheckFailure): d.send(data)
         self.assertFalse(d.connection.writes)
 
@@ -57,6 +58,32 @@ class QuestionChecks(unittest.TestCase):
         d.connection = FakeSerial(b"CompanionQuestion: UI state=SPEA", b"KING wake_armed=0\n")
         d.read(); d.read()
         self.assertEqual(events.count("speaking"), 1)
+
+    def test_cloud_preflight_failure_keeps_start_disabled(self):
+        class Unavailable(DemoQuestion):
+            def connect(self): raise CheckFailure("Cloud preflight failed; no microphone recording started.")
+        base = Path(__file__).resolve().parent.parent / "logs" / "question-ui-tests"
+        base.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=base) as temp:
+            window = tk.Tk(); app = QuestionApp(window, demo=True, results=Path(temp))
+            app.worker.client_factory = Unavailable
+            try:
+                app.connect()
+                deadline = time.monotonic() + 4
+                while time.monotonic() < deadline and app.busy:
+                    window.update(); time.sleep(.01)
+                self.assertFalse(app.connected)
+                self.assertEqual(str(app.start_button['state']), "disabled")
+                self.assertEqual(app.data['attempts'], [])
+                self.assertIn('Cloud preflight failed', app.data['last_error'])
+            finally:
+                app.finish()
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and app.worker.is_alive():
+                    window.update(); time.sleep(.01)
+                window.update()
+                try: window.destroy()
+                except tk.TclError: pass
 
     def test_click_flow_autosaves_and_closes_during_capture(self):
         base = Path(__file__).resolve().parent.parent / "logs" / "question-ui-tests"
@@ -76,6 +103,8 @@ class QuestionChecks(unittest.TestCase):
             try:
                 app.connect(); until(lambda: app.connected)
                 self.assertEqual(app.data["attempts"], [])
+                self.assertTrue(app.data["cloud_preflight"]["passed"])
+                self.assertEqual(app.data["cloud_preflight"]["audio_messages_sent"], 0)
                 app.start(); app.stop()
                 self.assertEqual(app.current["state"], "cancelled")
                 app.start(); until(lambda: app.current["state"] == "awaiting_confirmation")

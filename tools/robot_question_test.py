@@ -18,6 +18,7 @@ from robot_question_client import QuestionClient
 
 class DemoQuestion(DemoRobot):
     def connect(self):
+        self.callback("preflight", {"measurement": {"passed": True, "questions_sent": 0, "audio_messages_sent": 0, "demo": True}})
         return {**super().connect(), "pcm_shift": 15}
 
     def capture(self, kind):
@@ -110,7 +111,7 @@ class QuestionApp:
             self.worker = Worker(self.events, client_factory=DemoQuestion if self.demo else QuestionClient)
             self.worker.start()
         self.busy = True; self.phase = "connecting"; self.status.set("Connecting…")
-        self.hint.set("Verifying the robot and connecting its saved Wi-Fi. Wait before speaking.")
+        self.hint.set("Checking the robot, Wi-Fi and Gemini before recording. Wait before speaking.")
         self.refresh(); self.worker.commands.put(("connect", {}))
 
     def start(self):
@@ -170,6 +171,8 @@ class QuestionApp:
                     self.connected = True; self.busy = False; self.phase = "idle"
                     self.data["policy"] = data; self.save()
                     self.status.set("Ready when you are"); self.hint.set("Click Start question. No need to coordinate with chat.")
+                elif name == "preflight":
+                    self.data["cloud_preflight"] = data["measurement"]; self.save()
                 elif name == "recording" and self.current:
                     self.current["state"] = "recording"; self.recording_started = when; self.save()
                     self.status_label.configure(fg="#138362"); self.hint.set("Speak to the ROBOT now. Say the question once at normal volume.")
@@ -191,6 +194,7 @@ class QuestionApp:
                     self.recording_started = None; self.busy = False; self.connected = False; self.phase = "disconnected"
                     if self.current and self.current["state"] in {"countdown", "recording"}:
                         self.current.update(state="error", ended_at=utc_now(), error=data["message"])
+                    self.data["last_error"] = data["message"]
                     self.save(); self.status.set("Reconnect and retry"); self.hint.set(data["message"])
                 self.refresh()
         except queue.Empty: pass

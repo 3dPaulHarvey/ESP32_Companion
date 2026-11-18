@@ -49,6 +49,28 @@ constexpr bool ResumptionNoticeIsOnlyMetadata() {
     return json.Parse("{\"sessionResumptionUpdate\":{\"resumable\":false,\"newHandle\":\"public-fixture\"}}") &&
         Consume(json, pcm.data(), pcm.size(), state, reason) && !state.turn_complete && !state.bytes && !state.chunks;
 }
+constexpr bool VoiceActivityIsOnlyMetadata(bool after_turn) {
+    JsonDocument json; AudioState state; std::array<std::uint8_t, 4> pcm{}; const char* reason = "none";
+    state.turn_complete = after_turn;
+    return json.Parse("{\"voiceActivity\":{\"type\":\"ACTIVITY_END\",\"audioOffset\":\"2.4s\"}}") &&
+        Consume(json, pcm.data(), pcm.size(), state, reason) && state.turn_complete == after_turn && !state.bytes && !state.chunks;
+}
+constexpr bool QuestionTranscriptionIsOnlyMetadata(bool after_turn) {
+    JsonDocument json; AudioState state; std::array<std::uint8_t, 4> pcm{}; const char* reason = "none";
+    state.turn_complete = after_turn;
+    return json.Parse("{\"serverContent\":{\"inputTranscription\":{\"text\":\"public fixture\",\"finished\":true}}}") &&
+        !Consume(json, pcm.data(), pcm.size(), state, reason) &&
+        Consume(json, pcm.data(), pcm.size(), state, reason, true) && state.turn_complete == after_turn && !state.bytes;
+}
+constexpr bool QuestionMetadataCannotAppendAudioAfterTurn() {
+    JsonDocument json; AudioState state; std::array<std::uint8_t, 4> pcm{}; const char* reason = "none";
+    state.turn_complete = true;
+    return json.Parse(kAudio) && !Consume(json, pcm.data(), pcm.size(), state, reason, true);
+}
+constexpr bool RejectQuestionMetadata(std::string_view message) {
+    JsonDocument json; AudioState state; std::array<std::uint8_t, 4> pcm{}; const char* reason = "none";
+    return json.Parse(message) && !Consume(json, pcm.data(), pcm.size(), state, reason, true);
+}
 static_assert(JsonAccepts("{\"usageMetadata\":{\"totalTokenCount\":12,\"x\":-1.25e+2},\"serverContent\":{\"outputTranscription\":{\"text\":\"hi\\nthere\\u0021\"}}}"));
 static_assert(!JsonAccepts("{\"x\":1,\"x\":2}"));
 static_assert(!JsonAccepts("{\"x\":{\"a\":1,\"a\":2}}"));
@@ -81,4 +103,14 @@ static_assert(SignedPcmMetrics());
 static_assert(ResumptionNoticeIsOnlyMetadata());
 static_assert(!VoiceAccepts("{\"sessionResumptionUpdate\":true}"));
 static_assert(JsonAccepts(kGreeting));
+static_assert(VoiceActivityIsOnlyMetadata(false));
+static_assert(VoiceActivityIsOnlyMetadata(true));
+static_assert(!VoiceAccepts("{\"voiceActivity\":true}"));
+static_assert(!VoiceAccepts("{\"voiceActivity\":{},\"toolCall\":{}}"));
+static_assert(QuestionTranscriptionIsOnlyMetadata(false));
+static_assert(QuestionTranscriptionIsOnlyMetadata(true));
+static_assert(QuestionMetadataCannotAppendAudioAfterTurn());
+static_assert(RejectQuestionMetadata("{\"serverContent\":{\"inputTranscription\":true}}"));
+static_assert(RejectQuestionMetadata("{\"serverContent\":{\"inputTranscription\":{\"text\":42}}}"));
+static_assert(RejectQuestionMetadata("{\"serverContent\":{\"inputTranscription\":{\"finished\":\"true\"}}}"));
 }  // namespace

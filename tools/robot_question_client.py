@@ -11,7 +11,10 @@ INPUT_RESULT = r"CompanionQuestion: INPUT bytes=(\d+) chunks=(\d+) stream_ended=
 
 
 def question_metadata(text):
-    output = voice_metadata(text, QUESTION_RESULT)
+    try:
+        output = voice_metadata(text, QUESTION_RESULT)
+    except CheckFailure as error:
+        raise CheckFailure(str(error).replace("Voice test", "Question test")) from None
     match = re.search(INPUT_RESULT, text)
     if not match or tuple(map(int, match.groups())) != (128000, 100, 1):
         raise CheckFailure("The robot did not send exactly one complete four-second PCM input stream.")
@@ -22,7 +25,7 @@ def question_metadata(text):
 
 class QuestionDevice(CalibratorDevice):
     def send(self, data):
-        if data not in {b"s", b"w", b"o", b"q", b"x", b"[", b"]", b"="}:
+        if data not in {b"s", b"w", b"o", b"q", b"j", b"x", b"[", b"]", b"="}:
             raise CheckFailure("The question test cannot send provisioning or unrelated diagnostic commands.")
         if data != b"s" and not self.trusted:
             raise CheckFailure("Development board identity has not been verified.")
@@ -51,7 +54,8 @@ class QuestionClient(RobotClient):
         self.device = QuestionDevice(callback, self.cancel, self.closing)
 
     def connect(self):
-        policy = super().connect()
+        policy = super().connect(hold_wake=False)
+        self.hold(False)  # Release any old app lease before the setup-only check.
         d = self.device
         start = d.send(b"s")
         d.wait(r"CompanionQuestion: FEATURE enabled=1 explicit_start=1 capture_samples=64000 audio_upload=manual_only", start)
@@ -59,6 +63,11 @@ class QuestionClient(RobotClient):
             raise CheckFailure("The robot must run the calibrated question firmware (capture shift 15).")
         start = d.send(b"w")
         d.wait(r"HardwareDiagnostics: WIFI connected ip=", start, timeout=40)
+        # Verify admission, fresh session validation and Gemini setup before
+        # enabling Start. This sends no question or microphone audio.
+        d.check_setup()
+        d.callback("preflight", {"measurement": dict(d.checks[-1])})
+        self.hold(True)
         return policy
 
     def capture(self, kind="question"):
@@ -101,7 +110,8 @@ class QuestionClient(RobotClient):
                 start = d.send(b"s")
                 local = d.wait(r"LocalCompanion: STATUS state=(\w+) .*pending=([01])", start, timeout=2)
                 voice = d.wait(r"CompanionVoice: STATUS active=([01]) speaking=([01]) wake_armed=[01] playback_busy=([01])", start)
-                if local[1] == "IDLE" and local[2] == "0" and (voice[1], voice[2], voice[3]) == ("0", "0", "0"): return
+                session = d.wait(r"CompanionSession: PROTOCOL version=1 mac=[0-9a-f:]+ configured=[01] busy=([01])", start)
+                if local[1] == "IDLE" and local[2] == "0" and (voice[1], voice[2], voice[3], session[1]) == ("0", "0", "0", "0"): return
                 time.sleep(.1)
             raise CheckFailure("The robot did not finish cleanup. Reset it before another question.")
         finally:

@@ -68,7 +68,7 @@ class RobotClient:
         self.closing = closing or threading.Event()
         self.device = CalibratorDevice(callback, self.cancel, self.closing)
 
-    def connect(self):
+    def connect(self, *, hold_wake=True):
         device = self.device
         device.connection.open()
         configured, busy = device.protocol()
@@ -82,7 +82,7 @@ class RobotClient:
         if status[1] == "on":
             start = device.send(b"o")
             device.wait(r"HardwareDiagnostics: WIFI off; wake remains local;", start)
-        self.hold(True)
+        if hold_wake: self.hold(True)
         return dict(device.capture)
 
     def hold(self, enabled):

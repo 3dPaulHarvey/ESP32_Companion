@@ -250,7 +250,7 @@ CompanionGeminiSetup::Result VerifyConnection(std::string_view temporary, Compan
 #endif
             } else {
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
-                if (!reply || !reply->Consume(std::string_view(message.data, frames.message_size()))) {
+                if (!reply || !reply->Consume(std::string_view(message.data, frames.message_size()), input != nullptr)) {
                     result.reason = reply ? reply->reason : "unexpected_setup_response"; return result;
                 }
                 frames.ResetMessage();

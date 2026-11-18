@@ -6,6 +6,8 @@ COM26 currently runs the [manual microphone-question profile](ESP32_QUESTIONS.md
 
 Build/flash the current increment with `-Profile question`; it uses `build-question/` and `sdkconfig.question.generated`. The local-only calibration alternative is `-Profile microphone`. Both now seed capture shift 15. The wrapper verifies the development MAC on COM26 before flashing. The preceding `voice`, `gemini` and `session` profiles retain separate build/configuration files. Original backups and `build-diagnostics/` remain available. The device's NVS credential survives normal application flashing; a full flash restore returns NVS to that backup's earlier state.
 
+Normal commands disable the developer-only synthetic fixture. `-FixtureCheck` is restricted to the question profile and requires the verified fixture preparation described in [question regression testing](ESP32_QUESTIONS.md). The installed normal image contains no fixture or f handler.
+
 ## Pinned setup
 
 - ESP-IDF **v5.5.2**, clean installed Git tag at `C:\esp\v5.5.2\esp-idf`.

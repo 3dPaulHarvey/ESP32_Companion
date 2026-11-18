@@ -22,5 +22,8 @@ void SetQuestionCaptureGuard(bool active);
 bool RequestQuestion(std::uint32_t capture_id);
 void CancelQuestion();
 bool QuestionCancelled();
+#if COMPANION_QUESTION_FIXTURE
+bool RequestQuestionFixture();
+#endif
 #endif
 }

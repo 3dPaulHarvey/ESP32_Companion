@@ -59,6 +59,9 @@ endif()
 if(CONFIG_COMPANION_GEMINI_QUESTION_PROBE)
     list(APPEND SOURCES "../tests/companion_question_policy_test.cpp")
 endif()
+if(COMPANION_QUESTION_FIXTURE)
+    list(APPEND SOURCES "companion/question_fixture.cc")
+endif()
 
 # Add board common files
 list(APPEND SOURCES
@@ -851,6 +854,19 @@ idf_component_register(SRCS ${SOURCES}
                         mbedtls
                         tcp_transport
                     )
+
+if(COMPANION_QUESTION_FIXTURE)
+    get_filename_component(QUESTION_FIXTURE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../../logs/robot-question-public-fixture.pcm" ABSOLUTE)
+    if(NOT EXISTS "${QUESTION_FIXTURE_FILE}")
+        message(FATAL_ERROR "Prepare the public synthetic question fixture before using FixtureCheck")
+    endif()
+    file(SIZE "${QUESTION_FIXTURE_FILE}" QUESTION_FIXTURE_SIZE)
+    if(NOT QUESTION_FIXTURE_SIZE EQUAL 128000)
+        message(FATAL_ERROR "The public question fixture must be exactly 128000 bytes")
+    endif()
+    target_add_binary_data(${COMPONENT_LIB} "${QUESTION_FIXTURE_FILE}" BINARY)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE COMPANION_QUESTION_FIXTURE=1)
+endif()
 
 if(CONFIG_COMPANION_GEMINI_SETUP_PROBE)
     # transport_ws has an error path that prints the upgrade request, including

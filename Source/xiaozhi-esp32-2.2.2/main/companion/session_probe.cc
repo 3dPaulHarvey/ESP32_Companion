@@ -5,6 +5,9 @@
 #endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
 #include "gemini_voice.h"
+#if COMPANION_QUESTION_FIXTURE
+#include "question_fixture.h"
+#endif
 #include "application.h"
 #endif
 
@@ -39,10 +42,11 @@ constexpr char kTag[] = "CompanionSession";
 constexpr char kUrl[] = "https://esp32-companion-control.stiener.workers.dev/device/session";
 constexpr char kNamespace[] = "companion";
 constexpr char kCredentialKey[] = "device_auth";
-enum class Kind { Session, Wrong, Missing, Gemini, Voice, Question };
+enum class Kind { Session, Wrong, Missing, Gemini, Voice, Question, Fixture };
 const char* KindName(Kind kind) {
-    return kind == Kind::Session ? "session" : kind == Kind::Wrong ? "wrong" : kind == Kind::Missing ? "missing" : kind == Kind::Gemini ? "gemini" : kind == Kind::Question ? "question" : "voice";
+    return kind == Kind::Session ? "session" : kind == Kind::Wrong ? "wrong" : kind == Kind::Missing ? "missing" : kind == Kind::Gemini ? "gemini" : kind == Kind::Question ? "question" : kind == Kind::Fixture ? "fixture" : "voice";
 }
+bool IsQuestion(Kind kind) { return kind == Kind::Question || kind == Kind::Fixture; }
 std::atomic<bool> busy{false};
 #if CONFIG_COMPANION_MICROPHONE_PREP
 std::atomic<bool> calibration_guard{false};
@@ -149,14 +153,21 @@ struct Result {
 };
 
 bool EnsureTime() {
-    if (std::time(nullptr) >= 1735689600) return true;
-    ESP_LOGI(kTag, "TIME syncing deadline_ms=15000");
+    // A plausible RTC date is sufficient for long-lived certificates, but a
+    // drift of only a few seconds can invalidate our one-minute token window.
+    // Require a fresh, bounded sync before requesting each temporary session.
+    const auto before = std::time(nullptr);
+    ESP_LOGI(kTag, "TIME syncing deadline_ms=15000 previous_unix_s=%lu", static_cast<unsigned long>(std::max<time_t>(0, before)));
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(2,
         ESP_SNTP_SERVER_LIST("time.google.com", "pool.ntp.org"));
     if (esp_netif_sntp_init(&config) != ESP_OK) return false;
     const auto error = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000));
     esp_netif_sntp_deinit();
-    return error == ESP_OK && std::time(nullptr) >= 1735689600;
+    const auto after = std::time(nullptr);
+    const bool ok = error == ESP_OK && after >= 1735689600;
+    ESP_LOGI(kTag, "TIME synced ok=%d correction_s=%ld unix_s=%lu", ok,
+        static_cast<long>(std::clamp<int64_t>(after - before, -2147483647, 2147483647)), static_cast<unsigned long>(std::max<time_t>(0, after)));
+    return ok;
 }
 
 Result FetchSession(Kind kind, ResponseBody& body, std::string_view& temporary) {
@@ -231,9 +242,14 @@ Result FetchSession(Kind kind, ResponseBody& body, std::string_view& temporary) 
         }
     }
     const std::string_view payload(body.data, used);
-    if (kind == Kind::Session || kind == Kind::Gemini || kind == Kind::Voice || kind == Kind::Question) {
+    if (kind == Kind::Session || kind == Kind::Gemini || kind == Kind::Voice || IsQuestion(kind)) {
+        companion_session::SessionDiagnostics diagnostics;
         if (!companion_session::ValidateSession(payload, static_cast<int64_t>(std::time(nullptr)) * 1000,
-                std::string_view(credential.value, 64), result.metadata, &temporary)) {
+                std::string_view(credential.value, 64), result.metadata, &temporary, &diagnostics)) {
+            ESP_LOGW(kTag, "SESSION_VALIDATION reason=%s body_bytes=%u temporary_bytes=%u start_delta_s=%ld expiry_delta_s=%ld",
+                diagnostics.reason, static_cast<unsigned>(used), static_cast<unsigned>(diagnostics.temporary_bytes),
+                static_cast<long>(std::clamp<int64_t>(diagnostics.start_delta_ms / 1000, -2147483647, 2147483647)),
+                static_cast<long>(std::clamp<int64_t>(diagnostics.expiry_delta_ms / 1000, -2147483647, 2147483647)));
             result.reason = "invalid_session_response"; return result;
         }
     } else if (payload != "{\"error\":\"unauthorized\"}" || std::strcmp(headers.challenge, "Bearer realm=\"esp32-companion\"") != 0) {
@@ -247,7 +263,10 @@ Result FetchSession(Kind kind, ResponseBody& body, std::string_view& temporary) 
 Result Perform(Kind kind, [[maybe_unused]] std::uint32_t capture_id) {
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
     auto question = kind == Kind::Question ? Application::GetInstance().GetAudioService().TakeQuestionAudio(capture_id) : nullptr;
-    if (kind == Kind::Question && (!question || !question->data() || question_cancelled.load())) {
+#if COMPANION_QUESTION_FIXTURE
+    if (kind == Kind::Fixture) question = MakeQuestionFixture();
+#endif
+    if (IsQuestion(kind) && (!question || !question->data() || question_cancelled.load())) {
         Result missing; missing.reason = question_cancelled.load() ? "cancelled" : "capture_unavailable"; return missing;
     }
 #endif
@@ -265,14 +284,14 @@ Result Perform(Kind kind, [[maybe_unused]] std::uint32_t capture_id) {
     }
 #endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
-    if (result.ok && (kind == Kind::Voice || kind == Kind::Question)) {
+    if (result.ok && (kind == Kind::Voice || IsQuestion(kind))) {
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
-        if (kind == Kind::Question && question_cancelled.load()) { result.ok = false; result.reason = "cancelled"; return result; }
+        if (IsQuestion(kind) && question_cancelled.load()) { result.ok = false; result.reason = "cancelled"; return result; }
 #endif
         if (result.metadata.start_in_seconds < 20) { result.ok = false; result.reason = "session_window_too_short"; return result; }
         CompanionGeminiVoice::Reply reply;
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
-        if (kind == Kind::Question) result.gemini = CompanionGeminiSetup::ReceiveQuestion(temporary, reply, *question);
+        if (IsQuestion(kind)) result.gemini = CompanionGeminiSetup::ReceiveQuestion(temporary, reply, *question);
         else
 #endif
         result.gemini = CompanionGeminiSetup::ReceiveGreeting(temporary, reply);
@@ -293,7 +312,7 @@ Result Perform(Kind kind, [[maybe_unused]] std::uint32_t capture_id) {
             result.playback_ms = static_cast<uint32_t>((esp_timer_get_time() - started) / 1000);
             if (!result.ok) result.reason = "playback_failed";
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
-            if (kind == Kind::Question && question_cancelled.load()) { result.ok = false; result.reason = "cancelled"; }
+            if (IsQuestion(kind) && question_cancelled.load()) { result.ok = false; result.reason = "cancelled"; }
 #endif
         }
     }
@@ -312,17 +331,17 @@ bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0) {
     bool expected = false;
     if (!busy.compare_exchange_strong(expected, true)) { ESP_LOGW(kTag, "REQUEST_REJECTED reason=busy"); return false; }
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
-    if (kind == Kind::Voice || kind == Kind::Question) voice_stage.store(CompanionSessionProbe::VoiceStage::Connecting);
+    if (kind == Kind::Voice || IsQuestion(kind)) voice_stage.store(CompanionSessionProbe::VoiceStage::Connecting);
 #endif
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
     pending_capture_id = capture_id;
-    if (kind == Kind::Question) question_cancelled.store(false);
+    if (IsQuestion(kind)) question_cancelled.store(false);
 #endif
     pending_kind = kind;
     const auto created = xTaskCreate([](void*) {
         const auto kind = pending_kind;
         const auto started = esp_timer_get_time();
-        ESP_LOGI(kTag, "REQUEST_BEGIN kind=%s no_audio_upload=%d", KindName(kind), kind != Kind::Question);
+        ESP_LOGI(kTag, "REQUEST_BEGIN kind=%s no_audio_upload=%d", KindName(kind), !IsQuestion(kind));
         const auto result = Perform(kind,
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
             pending_capture_id
@@ -339,16 +358,16 @@ bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0) {
         }
 #endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
-        if (kind == Kind::Voice || kind == Kind::Question) {
-            ESP_LOGI(kind == Kind::Question ? "CompanionQuestion" : "CompanionVoice", "RESULT ok=%d http=%d reason=%s upgrade_http=%d setup_ack=%d prompt_sent=%d turn_complete=%d close_sent=%d close_ack=%d close_code=%u audio_bytes=%u chunks=%u sample_rate=24000 played_samples=%lu duration_ms=%u rms=%u peak=%u clipped=%u playback_ms=%lu elapsed_ms=%lu cleanup=1 no_audio_upload=%d",
+        if (kind == Kind::Voice || IsQuestion(kind)) {
+            ESP_LOGI(IsQuestion(kind) ? "CompanionQuestion" : "CompanionVoice", "RESULT ok=%d http=%d reason=%s upgrade_http=%d setup_ack=%d prompt_sent=%d turn_complete=%d close_sent=%d close_ack=%d close_code=%u audio_bytes=%u chunks=%u sample_rate=24000 played_samples=%lu duration_ms=%u rms=%u peak=%u clipped=%u playback_ms=%lu elapsed_ms=%lu cleanup=1 no_audio_upload=%d",
                 result.ok, result.http_status, result.reason, result.gemini.upgrade_http, result.gemini.setup_ack,
                 result.gemini.prompt_sent, result.audio.turn_complete, result.gemini.close_sent, result.gemini.close_ack,
                 result.gemini.close_code, static_cast<unsigned>(result.audio.bytes), result.audio.chunks,
                 static_cast<unsigned long>(result.played_samples), static_cast<unsigned>(result.audio.bytes / 48),
                 result.rms, result.audio.peak, result.audio.clipped, static_cast<unsigned long>(result.playback_ms),
-                static_cast<unsigned long>((esp_timer_get_time() - started) / 1000), kind != Kind::Question);
+                static_cast<unsigned long>((esp_timer_get_time() - started) / 1000), !IsQuestion(kind));
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
-            if (kind == Kind::Question) ESP_LOGI("CompanionQuestion", "INPUT bytes=%u chunks=%u stream_ended=%d sample_rate=16000 input_cleared=1",
+            if (IsQuestion(kind)) ESP_LOGI("CompanionQuestion", "INPUT bytes=%u chunks=%u stream_ended=%d sample_rate=16000 input_cleared=1",
                 result.gemini.input_bytes, result.gemini.input_chunks, result.gemini.input_ended);
 #endif
         }
@@ -359,14 +378,14 @@ bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0) {
             result.metadata.expires_in_seconds, static_cast<unsigned long>((esp_timer_get_time() - started) / 1000));
         busy.store(false);
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
-        if (kind == Kind::Voice || kind == Kind::Question) voice_stage.store(CompanionSessionProbe::VoiceStage::Finished);
+        if (kind == Kind::Voice || IsQuestion(kind)) voice_stage.store(CompanionSessionProbe::VoiceStage::Finished);
 #endif
         vTaskDelete(nullptr);
-    }, "session_probe", (kind == Kind::Voice || kind == Kind::Question || kind == Kind::Gemini) ? 16384 : 12288, nullptr, 1, nullptr);
+    }, "session_probe", (kind == Kind::Voice || IsQuestion(kind) || kind == Kind::Gemini) ? 16384 : 12288, nullptr, 1, nullptr);
     if (created != pdPASS) {
         busy.store(false);
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
-        if (kind == Kind::Voice || kind == Kind::Question) voice_stage.store(CompanionSessionProbe::VoiceStage::Idle);
+        if (kind == Kind::Voice || IsQuestion(kind)) voice_stage.store(CompanionSessionProbe::VoiceStage::Idle);
 #endif
         ESP_LOGE(kTag, "REQUEST_REJECTED reason=task_allocation_failed");
     }
@@ -376,6 +395,9 @@ bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0) {
 
 namespace CompanionSessionProbe {
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
+#if COMPANION_QUESTION_FIXTURE
+bool RequestQuestionFixture() { return WifiManager::GetInstance().IsConnected() && Request(Kind::Fixture); }
+#endif
 void SetQuestionCaptureGuard(bool active) { question_capture_guard.store(active); }
 bool RequestQuestion(std::uint32_t capture_id) {
     if (!WifiManager::GetInstance().IsConnected()) { ESP_LOGW("CompanionQuestion", "REQUEST_REJECTED reason=wifi_required"); return false; }
@@ -416,6 +438,7 @@ void Initialize() {
     PrintStatus();
 }
 void PrintStatus() {
+    ESP_LOGI(kTag, "CLOCK unix_s=%lu", static_cast<unsigned long>(std::max<time_t>(0, std::time(nullptr))));
     uint8_t mac[6]{};
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
     Credential credential;
@@ -429,6 +452,9 @@ void PrintStatus() {
 #endif
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
     ESP_LOGI("CompanionQuestion", "FEATURE enabled=1 explicit_start=1 capture_samples=64000 audio_upload=manual_only");
+#if COMPANION_QUESTION_FIXTURE
+    ESP_LOGI("CompanionQuestion", "FIXTURE_FEATURE enabled=1 microphone=0");
+#endif
 #endif
 }
 void Poll(std::int64_t now_us) {

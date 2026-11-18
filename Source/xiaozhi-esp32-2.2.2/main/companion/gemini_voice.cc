@@ -14,10 +14,10 @@ Reply::~Reply() {
     if (pcm_) { mbedtls_platform_zeroize(pcm_, companion_voice::kAudioLimit); heap_caps_free(pcm_); }
     if (json_) { json_->~JsonDocument(); mbedtls_platform_zeroize(json_, sizeof(*json_)); heap_caps_free(json_); }
 }
-bool Reply::Consume(std::string_view message) {
+bool Reply::Consume(std::string_view message, bool input_mode) {
     if (!ready()) { reason = "allocation_failed"; return false; }
     if (!json_->Parse(message)) { reason = "invalid_or_complex_json"; return false; }
-    return companion_voice::Consume(*json_, pcm_, companion_voice::kAudioLimit, state, reason);
+    return companion_voice::Consume(*json_, pcm_, companion_voice::kAudioLimit, state, reason, input_mode);
 }
 unsigned Reply::rms() const {
     return state.bytes ? static_cast<unsigned>(std::sqrt(static_cast<double>(state.squares) / (state.bytes / 2))) : 0;

@@ -68,6 +68,18 @@ constexpr bool BorrowedViewHasOwner() {
     return !ValidateSession(kResponse, kNow + 60000, kCredential, result, &temporary) && temporary.empty();
 }
 
+constexpr bool DiagnoseClockSkew() {
+    SessionMetadata result;
+    SessionDiagnostics diagnostics;
+    std::string_view borrowed;
+    if (ValidateSession(kResponse, kNow - 6000, kCredential, result, &borrowed, &diagnostics) || !borrowed.empty()) return false;
+    if (std::string_view(diagnostics.reason) != "clock_behind" || diagnostics.start_delta_ms != 66000) return false;
+    if (ValidateSession(kResponse, kNow + 61000, kCredential, result, &borrowed, &diagnostics)) return false;
+    if (std::string_view(diagnostics.reason) != "start_expired" || diagnostics.start_delta_ms != -1000) return false;
+    return ValidateSession(kResponse, kNow, kCredential, result, &borrowed, &diagnostics) &&
+        std::string_view(diagnostics.reason) == "verified" && diagnostics.start_delta_ms == 60000;
+}
+
 static_assert(TimestampMs("2026-01-01T00:00:00.000Z") == kNow);
 static_assert(TimestampMs("2028-02-29T12:34:56.123Z") > 0);
 static_assert(TimestampMs("2026-02-29T00:00:00.000Z") == -1);
@@ -92,4 +104,5 @@ static_assert(FrameValidAndCleared());
 static_assert(RejectFrame(63, false) && RejectFrame(65, false) && RejectFrame(64, true));
 static_assert(TimeoutDrainsInput());
 static_assert(BorrowedViewHasOwner());
+static_assert(DiagnoseClockSkew());
 }  // namespace

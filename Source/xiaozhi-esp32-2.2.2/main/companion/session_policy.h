@@ -51,6 +51,12 @@ struct SessionMetadata {
     int expires_in_seconds = 0;
 };
 
+struct SessionDiagnostics {
+    const char* reason = "unavailable";
+    std::int64_t start_delta_ms = 0, expiry_delta_ms = 0;
+    std::size_t temporary_bytes = 0;
+};
+
 // The Worker owns a flat five-string response. Reject unknown/duplicate fields,
 // nesting, escaped/control/non-ASCII strings and trailing data. Values are
 // borrowed only during validation; no temporary credential is copied or kept.
@@ -85,39 +91,51 @@ private:
 
 constexpr bool ValidateSession(std::string_view body, std::int64_t now_ms,
                                std::string_view device_credential, SessionMetadata& result,
-                               std::string_view* borrowed_temporary = nullptr) {
+                               std::string_view* borrowed_temporary = nullptr,
+                               SessionDiagnostics* diagnostics = nullptr) {
     result = {};
+    if (diagnostics) *diagnostics = {};
+    auto reject = [&](const char* reason) { if (diagnostics) diagnostics->reason = reason; return false; };
     if (borrowed_temporary) *borrowed_temporary = {};
-    if (body.empty() || body.size() > kBodyLimit || now_ms < 1735689600000LL) return false;
+    if (body.empty() || body.size() > kBodyLimit) return reject("body_size");
+    if (now_ms < 1735689600000LL) return reject("clock_uninitialized");
     FlatJson json(body);
-    if (!json.Take('{')) return false;
+    if (!json.Take('{')) return reject("invalid_json");
     unsigned seen = 0;
     std::string_view temporary, expires, starts;
     for (int i = 0; i < 5; ++i) {
-        if (i && !json.Take(',')) return false;
+        if (i && !json.Take(',')) return reject("invalid_json");
         std::string_view key, value;
-        if (!json.String(key) || !json.Take(':') || !json.String(value)) return false;
+        if (!json.String(key) || !json.Take(':') || !json.String(value)) return reject("invalid_json");
         unsigned bit = 0;
         if (key == "token") { bit = 1; temporary = value; }
-        else if (key == "model") { bit = 2; if (value != kModel) return false; }
+        else if (key == "model") { bit = 2; if (value != kModel) return reject("wrong_model"); }
         else if (key == "expires_at") { bit = 4; expires = value; }
         else if (key == "new_session_expires_at") { bit = 8; starts = value; }
-        else if (key == "websocket_url") { bit = 16; if (value != kWebSocket) return false; }
-        else return false;
-        if (seen & bit) return false;
+        else if (key == "websocket_url") { bit = 16; if (value != kWebSocket) return reject("wrong_endpoint"); }
+        else return reject("unknown_field");
+        if (seen & bit) return reject("duplicate_field");
         seen |= bit;
     }
     if (seen != 31 || !json.Take('}') || !json.End() || temporary.size() < 16 ||
-        temporary.size() > 8192 || temporary == device_credential) return false;
-    for (char c : temporary) if (c < 0x21 || c > 0x7e) return false;
+        temporary.size() > 8192 || temporary == device_credential) return reject("invalid_contract");
+    for (char c : temporary) if (c < 0x21 || c > 0x7e) return reject("invalid_temporary");
     const auto expire_ms = TimestampMs(expires), start_ms = TimestampMs(starts);
-    if (expire_ms < 0 || start_ms < 0 || expire_ms - start_ms != 240000 ||
-        start_ms <= now_ms || start_ms - now_ms > 65000 || expire_ms - now_ms > 305000) return false;
+    if (expire_ms < 0 || start_ms < 0) return reject("invalid_timestamp");
+    if (diagnostics) {
+        diagnostics->temporary_bytes = temporary.size();
+        diagnostics->start_delta_ms = start_ms - now_ms;
+        diagnostics->expiry_delta_ms = expire_ms - now_ms;
+    }
+    if (expire_ms - start_ms != 240000) return reject("invalid_lifetime");
+    if (start_ms <= now_ms) return reject("start_expired");
+    if (start_ms - now_ms > 65000 || expire_ms - now_ms > 305000) return reject("clock_behind");
     result.temporary_bytes = temporary.size();
     result.start_in_seconds = static_cast<int>((start_ms - now_ms) / 1000);
     result.expires_in_seconds = static_cast<int>((expire_ms - now_ms) / 1000);
     // This view is valid only while the caller owns the response buffer.
     if (borrowed_temporary) *borrowed_temporary = temporary;
+    if (diagnostics) diagnostics->reason = "verified";
     return true;
 }
 
