@@ -28,10 +28,10 @@ Build/flash/monitor tasks are also available through **Terminal > Run Task**. Re
 
 To build or flash local diagnostics, add `-Profile diagnostics` to the wrapper command. The default profile remains `baseline`.
 
-**Phase 3a health endpoint is verified locally and online:** runtime tests, packaging and hosted HTTPS success/error checks pass. [Run the Worker and view the next steps](docs/CLOUD_WORKER.md). Device authentication and Gemini remain subsequent checkpoints. [Beginner architecture overview](docs/CLOUD_OVERVIEW.md). The baseline retains the original network, activation, and protocol behavior.
+**Phase 3a health endpoint is verified locally and online:** runtime tests, packaging and hosted HTTPS success/error checks pass. [Run the Worker and view the next steps](docs/CLOUD_WORKER.md). [Beginner architecture overview](docs/CLOUD_OVERVIEW.md). The baseline retains the original network, activation, and protocol behavior.
 
-**Phase 3b device authentication is verified locally and online:** missing/wrong credentials are rejected and the current local credential succeeds after synchronizing the Production Secret. [Device authentication procedure](docs/DEVICE_AUTH.md). Request limiting, Gemini session issuance and ESP32 cloud transport remain later steps.
+**Phase 3b device authentication is verified locally and online:** missing/wrong credentials are rejected and the current local credential succeeds after synchronizing the Production Secret. [Device authentication procedure](docs/DEVICE_AUTH.md).
 
-**Phase 3c request limits pass locally:** a 10-request/minute device threshold produces 429/retry responses and recovers after the retry window. The built-in binding and code must be deployed together with Wrangler; account authorization and hosted verification are pending. [Rate-limit deployment and checks](docs/RATE_LIMITS.md).
+**Phase 3c shared request limits are verified locally and online:** the device gets 10 control requests per rolling minute, excess requests receive 429/retry responses, and recovery passes. Wrangler is authorized and the SQLite-backed counter is deployed. [Rate-limit deployment and checks](docs/RATE_LIMITS.md). Gemini session issuance and ESP32 cloud transport remain later steps.
 
 Based on [TechTalkies/Xiaozhi-for-XiaoESP32S3](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3), preserving the supplied licenses and attribution.

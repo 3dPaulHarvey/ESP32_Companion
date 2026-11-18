@@ -1,6 +1,6 @@
 """Verify burst throttling and optional recovery on our auth-only device check.
 
-Makes at most 35 authenticated burst requests. Reads the ignored local credential,
+Makes at most 11 authenticated burst requests. Reads the ignored local credential,
 refuses redirects, and never prints it. This route makes no Gemini requests.
 """
 
@@ -55,7 +55,8 @@ def verify(base, token, recover, results):
     opener = urllib.request.build_opener(NoRedirect())
     wrong = ("0" if token[0] != "0" else "1") + token[1:]
     admitted = 0
-    for _ in range(35):
+    burst_start = time.monotonic()
+    for _ in range(11):
         result = probe(opener, base, "/device/check", token)
         if result["status"] == 429:
             expect(result, 429, {"error": "rate_limited"}, "burst throttled", results)
@@ -70,7 +71,9 @@ def verify(base, token, recover, results):
         expect(result, 200, {"authenticated": True}, "burst request admitted", results)
         admitted += 1
     else:
-        raise RuntimeError("No 429 observed in 35 requests; check the deployed limiter binding and configuration.")
+        if time.monotonic() - burst_start >= 60:
+            raise RuntimeError("The burst spanned a full rate window; retry with a faster network connection.")
+        raise RuntimeError("More than 10 requests admitted within one window; check the deployed shared limiter.")
 
     expect(probe(opener, base, "/device/check"), 401, {"error": "unauthorized"}, "missing credential while throttled", results)
     expect(probe(opener, base, "/device/check", wrong), 401, {"error": "unauthorized"}, "wrong credential while throttled", results)

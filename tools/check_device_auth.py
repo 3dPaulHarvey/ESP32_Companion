@@ -99,13 +99,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", type=validate_base, default=HOSTED_BASE,
                         help="Target service origin; this is where the device credential will be sent.")
+    parser.add_argument("--name", default="worker-device-auth-check", help="Log basename under logs/.")
     args = parser.parse_args()
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", args.name):
+        parser.error("--name must contain only letters, digits, underscores or hyphens")
     try:
         results = check(args.base_url, load_token())
     except RuntimeError as error:
         parser.exit(1, f"Authentication check failed: {error}\n")
     root = Path(__file__).resolve().parent.parent
-    output = root / "logs" / "worker-device-auth-check.log"
+    output = root / "logs" / (args.name + ".log")
     output.parent.mkdir(exist_ok=True)
     output.write_text(json.dumps({"base_url": args.base_url, "checks": results}, indent=2) + "\n", encoding="utf-8")
     print("All authentication checks passed. No token value was printed or logged.")

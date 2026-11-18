@@ -38,8 +38,9 @@ Useful failure clues:
 | Result | Check |
 |---|---|
 | 404 | Deploy the updated `index.js`; the older health-only version has no device route |
-| 503 | Production secret is absent or malformed; verify its exact name and 64 lowercase hex characters without surrounding quotes |
+| 503 | Check the Production secret's name/64-character format and the required DEVICE_RATE_LIMITER binding/backend |
 | 401 for the correct-credential test | The Production secret and current local token do not match |
+| 429 | The authenticated device allowance is spent; wait the Retry-After delay before retrying |
 
 The first hosted run reached that last condition: all three POST requests returned 401. Re-saving the existing Production Secret from the current local file resolved it, and all three cases now pass. For a future mismatch, synchronize the same way and close the private file before replying. There is no need to send its value in chat.
 
@@ -63,7 +64,7 @@ Stop the development server with **x** when finished. The local tests use a publ
 
 `POST /device/check` expects `Authorization: Bearer <DEVICE_AUTH_TOKEN>`. The token must match the generated 64-character value exactly; the Bearer scheme is case-insensitive. Tokens in the URL or body are not accepted. The Worker validates its configured secret before comparing fixed-length bytes with Cloudflare's timing-resistant comparison. Missing/malformed configuration rejects access with 503.
 
-This is one shared credential for one development device. It is not a Cloudflare account API token, a Gemini API key, or a Gemini temporary session token. Session issuance and device-side transport remain later work. A request limiter is now prepared locally; deploy its binding and code together using [RATE_LIMITS.md](RATE_LIMITS.md), rather than pasting only the updated source. No complete Phase 3 exit gate or robot conversation is claimed here.
+This is one shared credential for one development device. It is not a Cloudflare account API token, a Gemini API key, or a Gemini temporary session token. Session issuance and device-side transport remain later work. The shared request limiter is now verified online; use [RATE_LIMITS.md](RATE_LIMITS.md) to deploy its binding/migration and code together. No complete Phase 3 exit gate or robot conversation is claimed here.
 
 The first locally generated credential was rotated after IDE-selected text exposed it in chat, before the user confirmed saving the replacement. Its value is absent from tracked source/docs/logs. Keep the private file closed when sending IDE context.
 

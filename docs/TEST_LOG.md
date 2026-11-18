@@ -278,3 +278,31 @@ Logs: `logs/worker-rate-runtime-tests.log`, `worker-rate-bundle.log`, `worker-ra
 Cloudflare's current docs say rate-limit bindings are not visible in the dashboard, so this increment needs Wrangler configuration deployment. CLI account status was checked privately and is not authenticated. A reduced-scope OAuth login is prepared (`account:read`, `user:read`, `workers_scripts:write`) with OS-keyring storage requested. Authorization and hosted deployment have not yet occurred. See [RATE_LIMITS.md](RATE_LIMITS.md).
 
 **Local request-limit checkpoint passed; hosted checkpoint pending.** Cloudflare enforcement is approximate per location and cannot guarantee a strict worldwide quota or billing cap. Provider quota checks remain required before Gemini calls. No paid plan change or new Gemini access has been configured.
+
+## 2026-11-17 — Hosted rate-limit investigation and final shared-counter verification
+
+The user completed reduced-scope Wrangler OAuth authorization. Login and a private whoami check succeeded; account/user read and Worker script management are available, with OS-keyring storage requested and no fallback warning observed. The existing Worker's deployment history was retrieved before publishing. No account credential value was printed or placed in project source.
+
+Deployment preflight showed that the local default would enable preview URLs while the remote setting was false. Declined that upload and the subsequent configuration-replacement prompt, explicitly set `preview_urls: false`, and repeated the packaging check. Enabled observability was preserved. Generated root `.wrangler/` account-cache metadata is now ignored by Git.
+
+The initial native-binding deployment (`74d26067-9ef9-4552-8c55-10b49a430362`) confirmed DEVICE_RATE_LIMITER at 10 requests/60 seconds, but a bounded 35-request hosted burst produced no 429. A timed follow-up admitted 35 requests in 7.61 seconds plus probes at about 18, 28 and 38 seconds across ATL/LAX locations. Metadata confirmed the binding and the current deployment. A second revision (`5e0495ce-1ec3-4edf-b830-48bfbffe0f42`) added an explicit delta of 1 and a response revision marker; 35 requests still passed without 429, with that revision confirmed. The underlying native-API behavior was not independently diagnosed. These runs were not accepted as a hosted limiter pass. Evidence: `logs/worker-rate-hosted-timing-diagnostic.log`, `worker-rate-limit-check.log`, and private version/deployment metadata.
+
+The final implementation follows Cloudflare's documented strict-limit approach: one globally addressed SQLite-backed Durable Object per development device. A synchronous transaction deletes expired admissions, counts remaining rows and admits only when fewer than 10 timestamps remain in the rolling 60-second window. At most 10 timestamps are retained; no secret or audio is stored. The counter key is fixed and nonsecret. Authentication precedes the counter; unavailable configuration/backend rejects authenticated traffic with 503.
+
+| Final check | Observed result |
+|---|---|
+| Runtime tests | PASS: 12 groups in local workerd, covering health/auth/misconfiguration/quota and concurrent admission |
+| Concurrent budget | PASS: 20 simultaneous authenticated requests produce exactly 10 accepted and 10 throttled responses |
+| Final packaging | PASS: 4.38 KiB / gzip 1.61 KiB; SQLite Durable Object binding recognized |
+| Hosted deployment | PASS: existing URL retained; version `b3740e90-919a-44ab-a803-86472f19231a`; startup 5 ms; revision marker `rate-limit-v3` |
+| Hosted burst | PASS: 10 admitted requests, next request 429 with a remaining retry delay (initially 58 seconds) |
+| Hosted rejection/health during throttle | PASS: missing/wrong credentials remain 401, health remains 200, changed query remains throttled |
+| Hosted recovery | PASS: correct authenticated request returns 200 after waiting the advertised remaining delay plus one second |
+| Local HTTP burst/recovery | PASS with the same final SQLite implementation: 10 admissions, 429, health/auth unaffected, recovery successful |
+| Authentication regression | PASS after recovery on both targets: missing=401, wrong=401, correct=200 |
+| Credential handling | Private value remains Git-ignored and absent from source/result output; Production secret remained functional through deployment |
+| Cleanup | Final local development server shut down with x; hosted service remains running |
+
+Final evidence: `logs/worker-rate-v3-runtime-tests.log`, `worker-rate-v3-bundle.log`, `worker-rate-v3-hosted-verified.log`, `worker-rate-v3-local-verified.log`, `worker-rate-v3-hosted-auth-regression.log`, `worker-rate-v3-local-auth-regression.log`, and current `worker-rate-deployment.json`. Archived auth results were checked against their respective target origins. Both checker tools now allow distinct log names to avoid concurrent tests overwriting one another. The final HTTP checker permits at most 11 burst requests and rejects a serving-revision mismatch.
+
+**Phase 3c request limiting verified locally and online.** SQLite-backed Durable Objects are supported on Workers Free subject to its usage limits; no plan upgrade was performed. This admission guard is not a total spending cap, and Gemini/provider quota verification remains open. No Gemini key, token minting, personal voice upload, ESP32 provisioning or firmware change occurred. See [RATE_LIMITS.md](RATE_LIMITS.md) for the final configuration, commands and limitations; earlier native-binding entries remain historical evidence.
