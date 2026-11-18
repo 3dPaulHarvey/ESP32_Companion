@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local health endpoint for the ESP32 companion control service",
+  "description": "Authenticated Gemini session service for the ESP32 companion",
   "engines": {
     "node": ">=22.12.0"
   },
@@ -13,7 +13,8 @@
     "check": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
     "login": "wrangler login --use-keyring --scopes account:read user:read workers_scripts:write",
     "whoami": "wrangler whoami",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "session-check": "node ../tools/check_gemini_session.mjs --connect"
   },
   "devDependencies": {
     "miniflare": "5.20261117.0-beta",

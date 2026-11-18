@@ -306,3 +306,36 @@ The final implementation follows Cloudflare's documented strict-limit approach: 
 Final evidence: `logs/worker-rate-v3-runtime-tests.log`, `worker-rate-v3-bundle.log`, `worker-rate-v3-hosted-verified.log`, `worker-rate-v3-local-verified.log`, `worker-rate-v3-hosted-auth-regression.log`, `worker-rate-v3-local-auth-regression.log`, and current `worker-rate-deployment.json`. Archived auth results were checked against their respective target origins. Both checker tools now allow distinct log names to avoid concurrent tests overwriting one another. The final HTTP checker permits at most 11 burst requests and rejects a serving-revision mismatch.
 
 **Phase 3c request limiting verified locally and online.** SQLite-backed Durable Objects are supported on Workers Free subject to its usage limits; no plan upgrade was performed. This admission guard is not a total spending cap, and Gemini/provider quota verification remains open. No Gemini key, token minting, personal voice upload, ESP32 provisioning or firmware change occurred. See [RATE_LIMITS.md](RATE_LIMITS.md) for the final configuration, commands and limitations; earlier native-binding entries remain historical evidence.
+
+## 2026-11-17 - Phase 3d: hosted Gemini token and connection verified
+
+The user created a Gemini API key in Google AI Studio, reported that the project shows Free tier, and saved a Production Worker binding named `GEMINI_API_KEY`. Active-version metadata showed that it was `plain_text`. The ordinary Secret PUT refused a type conflict (Cloudflare code 10053); no key value was printed. A version-based Secret patch converted the binding to `secret_text`, verified that type and deployed version `1b228ab7-bb81-48ae-9044-c71c20c8ed17`. The value passed privately between subprocesses in memory/stdin, never through command arguments or a local credential file. An exact-value audit of 139 existing Wrangler/project log files found zero matches; no log redaction was needed. Earlier Cloudflare versions remain in its version history.
+
+Checked current official Google model/pricing/token/WebSocket documentation and the live v1beta discovery schema. Gemini 3.8 Live is listed with free-tier input/output; free-tier data may be used to improve Google's products. The tutorial's token-lock example differs from the live REST schema. Implemented the schema's `bidiGenerateContentSetup` with no field mask, so the entire setup is server-owned. The hosted connection subsequently accepted that request. Project access is verified at this checkpoint; remaining daily/concurrent quota is not measured.
+
+`POST /device/session` authenticates the existing device credential, shares the 10/60-second transactional admission counter, and obtains a one-use temporary token. New sessions must start within 60 seconds; expiration is five minutes from issuance. The complete setup locks `models/gemini-3.8-live`, audio output, at most 256 output tokens, a short English companion instruction and output transcription. No tools or session resumption are enabled. Client body/query settings are not parsed or forwarded. The permanent key goes only in a header to the fixed Google HTTPS endpoint; redirects are not followed. Provider responses are bounded to 16 KiB, timeout is 10 seconds, tokens are bounded/validated, and only approved response fields are returned. Provider errors are replaced with controlled error codes and an HTTP-status-only diagnostic header.
+
+Local iterations caught a rejection of empty HTTP POST streams and an unsupported redirect mode before publishing. The final handler ignores client session options and uses Workers' supported manual redirect mode, rejecting redirect responses without following them. Final results:
+
+| Check | Observed result |
+|---|---|
+| Runtime suite | PASS: all 20 workerd groups; existing health/auth/quota and concurrent-admission tests retained |
+| Session gating/policy | PASS: method/auth/key/limiter checks, fixed full REST setup, one-use/expiry request settings and approved response fields |
+| Shared budget | PASS: alternating device checks/session calls share ten admissions; excess calls never reach the fake provider |
+| Provider failures | PASS: rejection/quota, malformed/oversized/credential-echoing responses, no cross-origin redirect, controlled errors |
+| Timeout | PASS: unresponsive fixture provider returns 504 after approximately 10 seconds |
+| Packaging | PASS: 8.16 KiB / gzip 2.86 KiB; existing Durable Object binding recognized |
+| Hosted deployment | PASS: version `b9a750ce-b8db-464f-8d84-fa4b3b1fe901`, startup 4 ms, revision `gemini-session-v1` |
+| Hosted session methods/auth | PASS: GET=405, missing=401, incorrect=401 |
+| Real token issuance | PASS: authenticated request=200, exact model/response fields and expected expiry window |
+| Real Gemini connection | PASS: temporary token accepted by v1beta constrained WebSocket; `setupComplete` received; connection then closed |
+| Auth regression | PASS: hosted device check remains missing=401, incorrect=401, correct=200 |
+| Health regression | PASS: hosted exact public payload/no-store/current revision, HTTP 200 |
+| Real local HTTP | PASS: health=200, missing session auth=401, valid session auth without a local Gemini key=503; expected missing-key warning; local server then closed with x |
+| Credential/audio handling | No token/key printed or logged; permanent key absent from local source/credential files; no user question or microphone audio sent |
+
+`tools/check_gemini_session.mjs` reads only the existing ignored device credential. It validates the service origin, refuses HTTP redirects and emits controlled metadata. Its optional connection uses the temporary token in Google's required in-memory `access_token` WebSocket query parameter, without printing that URL, provider messages, error stacks or close reason. `tools/worker.ps1 -Action session-check` runs the complete issuance/setup check. Both required Production bindings are Secrets; observability and disabled preview URLs are preserved. No new dependency or paid-plan upgrade was introduced.
+
+Evidence: `logs/worker-gemini-runtime-tests.log`, `worker-gemini-bundle.log`, `worker-gemini-session-check.log`, `worker-gemini-hosted-auth-regression.log`, `worker-gemini-local-http.log` and sanitized `worker-gemini-deployment.json`. The rate-checker's expected serving revision now follows `gemini-session-v1`; its auth-only burst still makes no Gemini calls. Final metadata confirms both credential bindings remain `secret_text`.
+
+**Phase 3d token/connection checkpoint passed.** This establishes desktop-to-Worker-to-Gemini session access. Spoken output, audio input, microphone headroom and ESP32 cloud transport remain later checks. Robot firmware, COM26 flash, the original COM24 board and the reference repository were not changed. See [GEMINI_SESSIONS.md](GEMINI_SESSIONS.md).

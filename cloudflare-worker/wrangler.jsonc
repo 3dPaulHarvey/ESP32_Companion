@@ -6,7 +6,7 @@
   "send_metrics": false,
   "preview_urls": false,
   "secrets": {
-    "required": ["DEVICE_AUTH_TOKEN"]
+    "required": ["DEVICE_AUTH_TOKEN", "GEMINI_API_KEY"]
   },
   "observability": {
     "enabled": true

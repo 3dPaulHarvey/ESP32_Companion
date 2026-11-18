@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('install', 'test', 'check', 'dev', 'login', 'whoami', 'deploy')]
+    [ValidateSet('install', 'test', 'check', 'dev', 'login', 'whoami', 'deploy', 'session-check')]
     [string]$Action = 'test'
 )
 

@@ -2,12 +2,12 @@
 
 Phase 3c permits **10 authenticated control requests in a rolling 60-second window for the one development device**, initially on `POST /device/check`. A shared SQLite-backed Durable Object keeps the allowance consistent across Cloudflare locations and persists it across isolate restarts. Voice audio will use a separate Gemini WebSocket, not this control endpoint.
 
-Status on 2026-11-17: **deployed and verified locally and online**. Both HTTP tests admitted 10 requests, rejected the next, preserved health/authentication behavior during throttling, and accepted a request after the retry delay. All 12 runtime test groups pass, including concurrent admission tests. The serving revision is `rate-limit-v3`.
+Status on 2026-11-17: **deployed and verified locally and online**. Both HTTP tests admitted 10 requests, rejected the next, preserved health/authentication behavior during throttling, and accepted a request after the retry delay. The Phase 3c revision was `rate-limit-v3`. Phase 3d now serves `gemini-session-v1`, retaining this counter and sharing it with `/device/session`; all 20 runtime groups pass. [Gemini session checkpoint](GEMINI_SESSIONS.md).
 
 ## Behavior
 
 - Correct credentials are checked before the device quota. Missing/wrong credentials still receive 401 and do not spend that quota.
-- An admitted request returns the existing `{"authenticated":true}` response.
+- An admitted `/device/check` request returns `{"authenticated":true}`. An admitted `/device/session` request proceeds to temporary-token issuance.
 - A throttled request returns **429**, `{"error":"rate_limited"}`, a `Retry-After` value from 1–60 seconds, and `Cache-Control: no-store`. The delay reflects when the oldest admission leaves the window; another caller may consume the next available slot.
 - `/health` stays public and available when the device is throttled.
 - Missing/invalid/unavailable limiter configuration rejects authenticated requests with 503. It does not fall back to an in-memory counter or unbounded access.
@@ -15,13 +15,13 @@ Status on 2026-11-17: **deployed and verified locally and online**. Both HTTP te
 
 The original built-in Rate Limiting API passed local tests but did not return 429 in bounded hosted bursts, even after confirming the deployed revision and binding. Its documented per-location, approximate behavior was insufficient for this checkpoint's verification, so the final implementation uses the shared transactional counter Cloudflare recommends for strict limits. The underlying reason for the permissive native responses was not independently established. [Cloudflare's strict-limit guidance](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/#strict-limits)
 
-This admission limit is still **not a billing cap**: rejected and health requests consume Worker invocations, and a future long Gemini conversation has its own usage. Verify provider quotas and handle provider 429 responses before adding sessions.
+This admission limit is still **not a billing cap**: rejected and health requests consume Worker invocations, and a Gemini conversation has its own usage. The session endpoint handles Google's 429 separately as `provider_rate_limited`; check project quota before longer tests.
 
 ## Configuration
 
 `cloudflare-worker/wrangler.jsonc` binds `DEVICE_RATE_LIMITER` to the exported `DeviceRateLimiter` class and declares the `device-rate-sqlite-v1` migration. The class performs its cleanup, count and admission insert in one synchronous SQLite transaction. It retains at most 10 admission timestamps and stores no credential, audio or conversation data. It has no timer or alarm.
 
-The configuration requires the existing `DEVICE_AUTH_TOKEN` secret and preserves enabled observability and disabled preview URLs. Deploy code, binding and migration together using Wrangler. Pasting source alone into a fresh Worker would omit its required object binding. SQLite-backed Durable Objects are available on Workers Free, subject to its usage limits; no plan upgrade was performed. [Storage transactions](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transactionsync), [Free-plan availability and limits](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+The current configuration requires the existing `DEVICE_AUTH_TOKEN` and `GEMINI_API_KEY` Secrets and preserves enabled observability and disabled preview URLs. Deploy code, binding and migration together using Wrangler. Pasting source alone into a fresh Worker would omit its required object binding. SQLite-backed Durable Objects are available on Workers Free, subject to its usage limits; no plan upgrade was performed. [Storage transactions](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transactionsync), [Free-plan availability and limits](https://developers.cloudflare.com/durable-objects/platform/pricing/).
 
 ## Authorize and deploy
 
@@ -37,7 +37,7 @@ Login is already completed on this PC; repeat it when authorization expires or o
 
 Wrangler is configured to use OS-keyring credential storage; on Windows it may install its pinned npm keyring helper. No account API token or OAuth credential needs to be pasted into chat or the project. [Official login/scopes/keyring options](https://developers.cloudflare.com/workers/wrangler/commands/general/#login)
 
-The deployment uses the existing Worker name and Production device secret. The local private value is not embedded in its code or configuration. Confirm the account before deploying if Wrangler offers more than one. The final hosted version is `b3740e90-919a-44ab-a803-86472f19231a`; the health payload remains unchanged, with `X-Companion-Revision: rate-limit-v3` identifying the serving code.
+The deployment uses the existing Worker name and Production Secrets. Private values are not embedded in its code or configuration. Confirm the account before deploying if Wrangler offers more than one. The verified Phase 3c version was `b3740e90-919a-44ab-a803-86472f19231a`; see [GEMINI_SESSIONS.md](GEMINI_SESSIONS.md) for the current deployment. The health payload remains unchanged, and the current revision header is `X-Companion-Revision: gemini-session-v1`.
 
 ## Verify
 

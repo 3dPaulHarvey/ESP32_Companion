@@ -32,6 +32,8 @@ To build or flash local diagnostics, add `-Profile diagnostics` to the wrapper c
 
 **Phase 3b device authentication is verified locally and online:** missing/wrong credentials are rejected and the current local credential succeeds after synchronizing the Production Secret. [Device authentication procedure](docs/DEVICE_AUTH.md).
 
-**Phase 3c shared request limits are verified locally and online:** the device gets 10 control requests per rolling minute, excess requests receive 429/retry responses, and recovery passes. Wrangler is authorized and the SQLite-backed counter is deployed. [Rate-limit deployment and checks](docs/RATE_LIMITS.md). Gemini session issuance and ESP32 cloud transport remain later steps.
+**Phase 3c shared request limits are verified locally and online:** the device gets 10 control requests per rolling minute, excess requests receive 429/retry responses, and recovery passes. Wrangler is authorized and the SQLite-backed counter is deployed. [Rate-limit deployment and checks](docs/RATE_LIMITS.md).
+
+**Phase 3d Gemini session access is verified online:** the permanent key is a Production Worker Secret, authenticated temporary-token issuance passes, and Gemini 3.8 Live accepts the desktop constrained-WebSocket setup. All 20 local runtime test groups pass. No prompt or microphone audio was sent. Spoken replies and ESP32 transport are the next checkpoints. [Key setup, session contract and repeatable check](docs/GEMINI_SESSIONS.md).
 
 Based on [TechTalkies/Xiaozhi-for-XiaoESP32S3](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3), preserving the supplied licenses and attribution.

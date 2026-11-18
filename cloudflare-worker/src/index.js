@@ -11,6 +11,103 @@ const deviceRequestLimit = 10;
 const deviceWindowMs = 60000;
 // One authenticated development device. Never use its secret as a counter key.
 const deviceRateKey = "esp32-companion-control:development-device:v1";
+const geminiTokenUrl = "https://generativelanguage.googleapis.com/v1beta/auth_tokens";
+const geminiWebSocketUrl = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained";
+const geminiModel = "models/gemini-3.8-live";
+const providerTimeoutMs = 10000;
+
+async function readProviderJson(response) {
+  if (!response.headers.get("Content-Type")?.toLowerCase().startsWith("application/json") || !response.body) {
+    throw new Error("Invalid provider response");
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 16384) {
+        await reader.cancel();
+        throw new Error("Provider response too large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+}
+
+async function createGeminiSession(env, headers) {
+  const key = env?.GEMINI_API_KEY;
+  if (typeof key !== "string" || key.length < 20 || key.length > 4096 || /\s/.test(key)) {
+    return Response.json({ error: "service_unavailable" }, { status: 503, headers });
+  }
+  const now = Date.now();
+  const expiresAt = new Date(now + 5 * 60000).toISOString();
+  const newSessionExpiresAt = new Date(now + 60000).toISOString();
+  const signal = AbortSignal.timeout(providerTimeoutMs);
+  try {
+    const response = await fetch(geminiTokenUrl, {
+      method: "POST",
+      redirect: "manual",
+      signal,
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify({
+        uses: 1,
+        expireTime: expiresAt,
+        newSessionExpireTime: newSessionExpiresAt,
+        // The REST schema calls this bidiGenerateContentSetup. Omitting a
+        // fieldMask locks the entire setup, including the absence of tools.
+        bidiGenerateContentSetup: {
+          model: geminiModel,
+          generationConfig: { responseModalities: ["AUDIO"], maxOutputTokens: 256 },
+          systemInstruction: {
+            parts: [{ text: "You are a friendly robot companion. Speak English and keep replies to one or two short sentences." }],
+          },
+          outputAudioTranscription: {},
+        },
+      }),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      const errorHeaders = { ...headers, "X-Companion-Provider-Status": String(response.status) };
+      if (response.status === 429) {
+        return Response.json({ error: "provider_rate_limited" }, {
+          status: 429, headers: { ...errorHeaders, "Retry-After": "60" },
+        });
+      }
+      return Response.json({ error: "provider_unavailable" }, { status: 502, headers: errorHeaders });
+    }
+    const result = await readProviderJson(response);
+    const token = result?.name;
+    if (typeof token !== "string" || token.length < 16 || token.length > 8192 ||
+        !/^[\x21-\x7e]+$/.test(token) || token.includes(key)) {
+      throw new Error("Invalid temporary token");
+    }
+    // Provider bodies/errors and long-lived credentials must never be logged
+    // or passed through. Only the temporary credential belongs in this reply.
+    return Response.json({
+      token,
+      model: geminiModel,
+      expires_at: expiresAt,
+      new_session_expires_at: newSessionExpiresAt,
+      websocket_url: geminiWebSocketUrl,
+    }, { headers });
+  } catch {
+    return Response.json({ error: signal.aborted ? "provider_timeout" : "provider_unavailable" }, {
+      status: signal.aborted ? 504 : 502, headers,
+    });
+  }
+}
 
 export class DeviceRateLimiter extends DurableObject {
   constructor(ctx, env) {
@@ -85,9 +182,9 @@ async function enforceDeviceRateLimit(env, headers) {
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
-    const headers = { "Cache-Control": "no-store", "X-Companion-Revision": "rate-limit-v3" };
+    const headers = { "Cache-Control": "no-store", "X-Companion-Revision": "gemini-session-v1" };
 
-    if (pathname === "/device/check") {
+    if (pathname === "/device/check" || pathname === "/device/session") {
       if (request.method !== "POST") {
         return Response.json({ error: "method_not_allowed" }, {
           status: 405,
@@ -96,8 +193,11 @@ export default {
       }
       const rejection = authenticateDevice(request, env, headers);
       if (rejection) return rejection;
+      // Session policy is server-owned; client bodies and query options are
+      // never parsed or forwarded to Google.
       const throttled = await enforceDeviceRateLimit(env, headers);
       if (throttled) return throttled;
+      if (pathname === "/device/session") return createGeminiSession(env, headers);
       return Response.json({ authenticated: true }, { headers });
     }
 

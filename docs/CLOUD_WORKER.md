@@ -2,20 +2,21 @@
 
 Phase 3a is verified locally and on the hosted HTTPS address on 2026-11-17. The Worker is a small web service that will later authenticate the robot and issue Gemini session access. Its first route, `/health`, proves that the service runs and responds correctly.
 
-The current health response means the Worker program is running. It does not test device authentication, Gemini availability, quotas or a voice conversation. Device authentication and Gemini integration remain subsequent steps.
+The current health response means the Worker program is running. It does not test device authentication, Gemini availability, quotas or a voice conversation. Those have separate checks: hosted device authentication, shared request limits, temporary-token issuance and a desktop Gemini setup acknowledgment now pass. See [GEMINI_SESSIONS.md](GEMINI_SESSIONS.md) for the current stage.
 
 ## Verified dashboard deployment
 
 The user created `esp32-companion-control` through **Create app → Start with Hello World! → Deploy**, then replaced the starter with our prepared handler. Its public health address is **https://esp32-companion-control.stiener.workers.dev/health**. The user confirms it works; independent HTTPS GET/HEAD, unsupported-method and unknown-route checks all passed on 2026-11-17.
 
-To publish the prepared handler from the dashboard editor:
+That dashboard procedure established the initial health-only service. The current code also requires the configured Durable Object binding and Production Secrets, so publish it with Wrangler from the project root:
 
-1. Open this project's `cloudflare-worker/src/index.js` in VS Code. Select all and copy its contents.
-2. Click inside the Cloudflare editor's `worker.js` code area. Select all and paste, replacing the entire starter program.
-3. Click **Deploy** at the top right.
-4. Open **https://esp32-companion-control.stiener.workers.dev/health** in a browser tab. Expect `{"status":"ok","service":"esp32-companion","api_version":1}`.
+```powershell
+.\tools\worker.ps1 -Action test
+.\tools\worker.ps1 -Action check
+.\tools\worker.ps1 -Action deploy
+```
 
-The health handler uses the `/health` route. The bare `/` address returns `404` with `{"error":"not_found"}` as designed. The dashboard filename `worker.js` may differ from our local `src/index.js`; use the same program contents. No Wrangler account authorization is configured by this manual dashboard workflow. The local Node development server can stay stopped; the hosted Worker runs independently.
+Wrangler is already authorized on this PC. The health handler uses the `/health` route; the bare `/` address returns `404` with `{"error":"not_found"}`. The local development server can stay stopped while using the hosted Worker.
 
 ## Try it on this PC
 
@@ -33,7 +34,7 @@ Wait for `Ready on http://127.0.0.1:8787`, then open **http://127.0.0.1:8787/hea
 
 `127.0.0.1` means this PC. The development server listens there while the command runs. Press **x** in its terminal (or Ctrl+C) to stop it. No robot interaction is needed for this check; its existing wake/listen/cue behavior continues.
 
-This local stage needs no Cloudflare login or Gemini API key. The development server was stopped after verification, so run the command above before opening the URL.
+Local health needs no Cloudflare login or Gemini API key. With the current configuration, Wrangler warns that `GEMINI_API_KEY` is missing locally; that is expected because the real key remains in Production. Health works, and a valid local session request fails closed with 503. Fixture tests cover issuance without a real key. The development server was stopped after verification, so run the command above before opening the URL.
 
 ## Repeatable checks
 
@@ -44,7 +45,7 @@ This local stage needs no Cloudflare login or Gemini API key. The development se
 ```
 
 - `install` uses `npm ci` and the saved package lock to install the pinned development dependencies. This needs internet access when packages are not cached.
-- `test` runs health and device-authentication HTTP contract checks inside Cloudflare's local `workerd` runtime through Miniflare.
+- `test` runs 20 health/authentication/quota/session test groups inside Cloudflare's local `workerd` runtime through Miniflare, with fixture credentials and a fake Gemini provider.
 - `check` builds the Worker using `wrangler deploy --dry-run`. This prepares a local bundle without publishing it.
 
 | Request | Expected result |
@@ -52,9 +53,11 @@ This local stage needs no Cloudflare login or Gemini API key. The development se
 | `GET /health` | `200`, JSON shown above, `Cache-Control: no-store` |
 | `HEAD /health` | `200`, matching headers, empty body |
 | Other methods on `/health` | `405`, `Allow: GET, HEAD` |
-| Other routes, including `/device/session` | `404` |
+| `POST /device/check` | Authentication and shared-quota check; [contract](DEVICE_AUTH.md) |
+| `POST /device/session` | Authenticated temporary-token issuance; [contract](GEMINI_SESSIONS.md) |
+| Other routes | `404` |
 
-The handler makes no Gemini or other outbound service requests. It contains no embedded credentials. Both hosted health and device authentication are verified. See [DEVICE_AUTH.md](DEVICE_AUTH.md) for the authentication contract and repeatable checks. Gemini session issuance remains unimplemented.
+Health and device-check routes make no Gemini requests. Only an authenticated, admitted session request can contact Google's token service. The source contains no embedded credentials. The real Gemini key is stored only as a Production Worker Secret; fixture tests do not read or need it.
 
 ## Tooling and files
 
@@ -63,7 +66,7 @@ The separate `cloudflare-worker/` project contains:
 - `src/index.js`: request handler.
 - `wrangler.jsonc`: Worker name, entry point, compatibility date and local server configuration.
 - `package.json` / `package-lock.json`: pinned development tools and commands.
-- `test/health.test.js`: runtime checks for health, allowed methods, missing routes and device authentication.
+- `test/health.test.js`: runtime checks for health, methods, missing routes, authentication, shared quota and Gemini session/error behavior.
 
 `tools/worker.ps1` locates Node.js, selects this project and runs its commands. This PC has a project-local Node.js v24.22.3 distribution under ignored `.tools/`, downloaded from Node.js and verified against its published SHA256. Its download manifest is saved there. On another PC, install an active Node.js LTS release with npm (at least Node 22.12), reopen PowerShell and run the install command above.
 
@@ -76,10 +79,10 @@ Cloudflare currently lists Windows 11 as the supported Windows platform for Wran
 1. **Complete:** publish the health-only Worker and verify its HTTPS URL.
 2. **Complete:** store the device credential as a Production Secret and verify missing/wrong rejection plus correct-credential success over HTTPS.
 3. **Complete:** shared request limits, retry responses and recovery are verified locally and online. Wrangler is authorized and deploys the binding/migration plus code together. See [RATE_LIMITS.md](RATE_LIMITS.md).
-4. Verify Gemini Live's current model/token support and quota, then store the permanent key as a Worker secret and test token issuance.
-5. Prove a desktop Gemini connection before joining it to the ESP32. Finish microphone headroom calibration before voice streaming.
+4. **Complete:** current model/token schema checked, permanent key saved as a Production Secret, hosted token issuance and a desktop Gemini setup acknowledgment verified. User reports a Free-tier project; remaining quota is not measured by this check.
+5. Verify one desktop spoken response and a short audio-input exchange before joining it to the ESP32. Finish microphone headroom calibration before voice streaming.
 
-The permanent Gemini key belongs in the server secret workflow when we reach that step. It is not needed in chat, firmware or the health test.
+The permanent Gemini key belongs in the server secret workflow. It is not needed in chat, firmware or the health test.
 
 ## Device credential: hosted authentication verified
 

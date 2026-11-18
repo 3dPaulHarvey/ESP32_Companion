@@ -43,7 +43,7 @@ def probe(opener, base, path, credential=None, method="POST"):
 
 
 def expect(result, status, body, label, results):
-    if result["revision"] != "rate-limit-v3":
+    if result["revision"] != "gemini-session-v1":
         raise RuntimeError("The expected rate-limit revision is not serving this request yet.")
     passed = result["status"] == status and result["body"] == body and result["no_store"] and result["is_json"]
     results.append({"case": label, "status": result["status"], "passed": passed})

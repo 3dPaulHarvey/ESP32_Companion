@@ -1,15 +1,20 @@
 # Device authentication checkpoint
 
-Phase 3b adds a small **POST `/device/check`** route. It proves that a caller knows the one development robot's shared credential before we implement Gemini session issuance. `/health` remains public. This increment makes no Gemini requests, stores no voice and does not change the ESP32 firmware.
+Phase 3b adds a small **POST `/device/check`** route. It proves that a caller knows the one development robot's shared credential. `/health` remains public. This diagnostic route makes no Gemini requests and stores no voice. The current service also has [verified Gemini session issuance](GEMINI_SESSIONS.md); ESP32 cloud firmware remains later work.
 
 Status on 2026-11-17: **local and hosted authentication checks pass**. After the user synchronized the Production Secret with the current local value, hosted missing/wrong credentials returned 401 and the correct credential returned 200. Public health still passes. This proves the desktop-to-Worker authentication checkpoint; Gemini and ESP32 cloud integration remain later work.
 
-## Publish this increment
+## Publish the current service
 
-1. Open `cloudflare-worker/src/index.js` in VS Code and copy the entire file.
-2. In Cloudflare, open `esp32-companion-control` → **Edit code**. Replace all of `worker.js` with the copied contents.
-3. Click **Deploy**. The existing Production secret supplies `env.DEVICE_AUTH_TOKEN`; its value is not part of the source file.
-4. Report that the updated code is deployed. The desktop checker can then verify the hosted behavior.
+The original authentication-only increment was pasted into the dashboard editor. Current code/configuration includes a Durable Object binding and two required Production Secrets, so deploy them together with the already-authorized wrapper:
+
+```powershell
+.\tools\worker.ps1 -Action test
+.\tools\worker.ps1 -Action check
+.\tools\worker.ps1 -Action deploy
+```
+
+The existing Production Secret supplies `env.DEVICE_AUTH_TOKEN`; its value is not part of the source file. [Current configuration and hosting](CLOUD_WORKER.md).
 
 Opening `/device/check` in a browser sends GET and receives **405**. Use the desktop checker for the authenticated POST test; `/health` remains the browser check.
 
@@ -64,7 +69,7 @@ Stop the development server with **x** when finished. The local tests use a publ
 
 `POST /device/check` expects `Authorization: Bearer <DEVICE_AUTH_TOKEN>`. The token must match the generated 64-character value exactly; the Bearer scheme is case-insensitive. Tokens in the URL or body are not accepted. The Worker validates its configured secret before comparing fixed-length bytes with Cloudflare's timing-resistant comparison. Missing/malformed configuration rejects access with 503.
 
-This is one shared credential for one development device. It is not a Cloudflare account API token, a Gemini API key, or a Gemini temporary session token. Session issuance and device-side transport remain later work. The shared request limiter is now verified online; use [RATE_LIMITS.md](RATE_LIMITS.md) to deploy its binding/migration and code together. No complete Phase 3 exit gate or robot conversation is claimed here.
+This is one shared credential for one development device. It is separate from a Cloudflare account token, Gemini API key and Gemini temporary token. Shared request limits and desktop Gemini session access are now verified online; see [RATE_LIMITS.md](RATE_LIMITS.md) and [GEMINI_SESSIONS.md](GEMINI_SESSIONS.md). Device-side transport and a robot conversation remain later checks.
 
 The first locally generated credential was rotated after IDE-selected text exposed it in chat, before the user confirmed saving the replacement. Its value is absent from tracked source/docs/logs. Keep the private file closed when sending IDE context.
 
