@@ -58,8 +58,7 @@ class GeminiDevice(Device):
         if busy_guard:
             self.wait(r"CompanionSession: REQUEST_REJECTED reason=busy", start)
         if overlap:
-            self.wait(r"LocalCompanion: CAPTURE_COMPLETE request=\d+ samples=32000 bytes=64000 .*sample_rate=16000", start)
-            self.wait(r"LocalCompanion: CYCLE_COMPLETE .*source=serial", start)
+            self.wait_local_capture(start)
         window = self.text[start:]
         if window.count("CompanionSession: REQUEST_BEGIN kind=gemini") != 1 or window.count("CompanionGemini: CONNECT_BEGIN") != 1:
             raise CheckFailure("Unexpected duplicate or automatic connection attempt.")
@@ -106,8 +105,7 @@ def main():
         device.wait(r"HardwareDiagnostics: WIFI off; wake remains local;", start)
         device.probe(b"j", "gemini", 0, False, reason="wifi_required")
         start = device.send(b"n")
-        device.wait(r"LocalCompanion: CAPTURE_COMPLETE request=\d+ samples=32000 bytes=64000", start)
-        device.wait(r"LocalCompanion: CYCLE_COMPLETE .*source=serial", start)
+        device.wait_local_capture(start)
         device.passed("local capture/cue recovery after transport shutdown")
         device.reset()
         start = len(device.text)

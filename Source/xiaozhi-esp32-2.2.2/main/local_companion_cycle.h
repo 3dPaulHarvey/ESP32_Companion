@@ -18,7 +18,8 @@ public:
     static constexpr std::int64_t kListeningTimeoutUs = 4000000;
     static constexpr std::int64_t kSpeakingDurationUs = 800000;
 
-    constexpr LocalCompanionCycle() = default;
+    explicit constexpr LocalCompanionCycle(std::int64_t listening_timeout_us = kListeningTimeoutUs)
+        : listening_timeout_us_(listening_timeout_us) {}
 
     constexpr LocalCompanionState state() const { return state_; }
     constexpr std::uint32_t started() const { return started_; }
@@ -45,7 +46,7 @@ public:
         switch (state_) {
             case LocalCompanionState::WakeDetected:
                 state_ = LocalCompanionState::Listening;
-                deadline_us_ = now_us + kListeningTimeoutUs;
+                deadline_us_ = now_us + listening_timeout_us_;
                 return true;
             case LocalCompanionState::Listening:
                 return Abort();
@@ -63,7 +64,7 @@ public:
     // The caller also checks request ID and successful PCM sample count.
     constexpr bool CaptureFinished(std::int64_t now_us) {
         if (state_ != LocalCompanionState::Listening
-            || now_us < deadline_us_ - kListeningTimeoutUs || now_us >= deadline_us_) {
+            || now_us < deadline_us_ - listening_timeout_us_ || now_us >= deadline_us_) {
             return false;
         }
         state_ = LocalCompanionState::Speaking;
@@ -102,6 +103,7 @@ public:
     }
 
 private:
+    std::int64_t listening_timeout_us_;
     LocalCompanionState state_ = LocalCompanionState::Idle;
     std::int64_t deadline_us_ = 0;
     std::uint32_t started_ = 0;

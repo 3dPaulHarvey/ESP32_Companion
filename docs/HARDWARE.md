@@ -1,6 +1,6 @@
 # Hardware baseline
 
-Last updated: 2026-11-17. Development device: **COM26**, MAC **44:bd:8d:ec:38:e0**.
+Last updated: 2026-11-18. Development device: **COM26**, MAC **44:bd:8d:ec:38:e0**.
 
 ## Verified by hardware probe
 
@@ -11,7 +11,8 @@ Last updated: 2026-11-17. Development device: **COM26**, MAC **44:bd:8d:ec:38:e0
 - Local diagnostic firmware now loads the model without cloud startup. User and serial evidence confirm repeated wake/cue/re-arm with Wi-Fi off, face-state cycling, and generated speaker tones. Microphone statistics respond to sound; close/loud input clips and input headroom still needs calibration before voice streaming. Saved-credential Wi-Fi connection and device-side reconnect passed; AP power-off/on was skipped by the user.
 - Phase 4a's session profile passes private NVS device-credential provisioning, certificate-verified HTTPS 401/200 checks, credential persistence, and a local capture/cue cycle during a successful request. [Session profile/results](ESP32_SESSIONS.md).
 - Phase 4b's `gemini` profile verifies six consecutive direct Gemini setup/close cycles, concurrent local capture and offline recovery. The user confirms eyes/wake/listening/cue after flashing. Lowest observed internal free watermark across those short runs was 53,743 bytes. [Setup profile/results](ESP32_GEMINI_SETUP.md).
-- Phase 4c's current `voice` profile receives a fixed Gemini greeting and plays 24 kHz PCM through the original I2S speaker task, then restores READY/wake. The user confirms clear speech at normal speed and speaking/READY behavior. Repeated playback, busy guards, device-side Wi-Fi loss and offline recovery pass. Wi-Fi remains off at boot, wake remains local, and microphone input is not uploaded. [Current speaker profile/results](ESP32_VOICE.md).
+- Phase 4c's `voice` profile receives a fixed Gemini greeting and plays 24 kHz PCM through the original I2S speaker task, then restores READY/wake. The user confirms clear speech at normal speed and speaking/READY behavior. Repeated playback, busy guards, device-side Wi-Fi loss and offline recovery pass. [Speaker profile/results](ESP32_VOICE.md).
+- Phase 4d's current `microphone` profile adds four-second local capture and an autosaving Windows calibrator. Exact counts, cancellation and control-lease recovery pass automated checks; user quiet/speech calibration is pending. Wi-Fi remains off at boot and no microphone input is uploaded. [Open and run the calibrator](MICROPHONE_CALIBRATOR.md).
 
 ## Wiring to preserve
 
@@ -50,7 +51,7 @@ Other definitions: onboard LED GPIO21; BOOT GPIO0; volume-up GPIO3; volume-down 
 | Installed toolchain | ESP-IDF v5.5.2 at `C:/esp/v5.5.2/esp-idf` |
 | Installed VS Code extension | ESP-IDF 2.3.0 |
 
-The I2S driver uses 32-bit slots. The codec converts microphone input to signed 16-bit PCM with a right shift of 12 and clipping, and scales speaker PCM into 32-bit output. Preserve the proven codec path. Although the board header defines `AUDIO_INPUT_REFERENCE`, the selected codec has one input channel and no reference channel; device AEC is not established by that define.
+The I2S driver uses 32-bit slots. Normal/wake input converts microphone words to signed 16-bit PCM with a right shift of 12 and clipping; speaker PCM is scaled into 32-bit output. The new microphone profile alone reads raw words for local question capture, using provisional shift 14 and measuring headroom before clipping. Wake conversion stays unchanged. Although the board header defines `AUDIO_INPUT_REFERENCE`, the selected codec has one input channel and no reference channel; device AEC is not established by that define.
 
 Source inconsistencies found during inspection:
 

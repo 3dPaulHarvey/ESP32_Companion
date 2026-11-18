@@ -4,7 +4,7 @@ import contextlib
 import io
 import unittest
 
-from check_esp32_session import CheckFailure, Device, EXPECTED_MAC
+from check_esp32_session import CheckFailure, Device, EXPECTED_MAC, capture_policy
 
 
 class FakeSerial:
@@ -33,6 +33,26 @@ def device_with(*chunks):
 
 
 class SessionHostChecks(unittest.TestCase):
+    def test_old_profile_retains_two_second_capture_contract(self):
+        self.assertEqual(capture_policy("")["samples"], 32000)
+
+    def test_new_profile_adopts_valid_four_second_capture_policy(self):
+        device = device_with(("LocalCompanion: CAPTURE_POLICY samples=64000 bytes=128000 duration_ms=4000 sample_rate=16000 worker_timeout_ms=5500 pcm_shift=14\n"
+            f"CompanionSession: PROTOCOL version=1 mac={EXPECTED_MAC} configured=1 busy=0\n").encode())
+        self.assertEqual(device.protocol(), (1, 0))
+        self.assertEqual(device.capture["samples"], 64000)
+
+    def test_inconsistent_or_excessive_capture_policy_is_rejected(self):
+        fixture = "LocalCompanion: CAPTURE_POLICY samples=64000 bytes=128000 duration_ms=4000 sample_rate=16000 worker_timeout_ms=5500 pcm_shift=14"
+        for changed in [fixture.replace("bytes=128000", "bytes=128002"), fixture.replace("pcm_shift=14", "pcm_shift=32"), fixture.replace("duration_ms=4000", "duration_ms=2000")]:
+            with self.assertRaises(CheckFailure): capture_policy(changed)
+
+    def test_four_second_capture_exact_count_and_cycle_are_required(self):
+        device = device_with(b"LocalCompanion: CAPTURE_COMPLETE request=2 samples=64000 bytes=128000 duration_ms=4000 sample_rate=16000 elapsed_ms=4120 rms=1000 peak=5000 clipped=0\n"
+            b"LocalCompanion: CYCLE_COMPLETE cycle=2 completed=2 source=serial voice_started=0 serial_started=2 aborted=0\n")
+        device.capture = capture_policy("LocalCompanion: CAPTURE_POLICY samples=64000 bytes=128000 duration_ms=4000 sample_rate=16000 worker_timeout_ms=5500 pcm_shift=14")
+        self.assertEqual(device.wait_local_capture(0)["samples"], 64000)
+
     def test_wrong_board_is_rejected_after_only_a_status_command(self):
         device = device_with(b"CompanionSession: PROTOCOL version=1 mac=44:bd:8d:ed:4e:4c configured=0 busy=0\n")
         with self.assertRaises(CheckFailure):

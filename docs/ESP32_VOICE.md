@@ -6,7 +6,7 @@ This is the speaker checkpoint within Phase 4. The robot's microphone has not be
 
 ## Current behavior
 
-COM26 now runs the separate **voice** profile. Boot still shows the startup faces/tones and blinking READY eyes with Wi-Fi off. **Hi, E-S-P -> LISTENING -> two-second local capture -> CUE -> READY** remains the local wake routine.
+The **voice** profile verified here uses **Hi, E-S-P -> LISTENING -> two-second local capture -> CUE -> READY**, with Wi-Fi off at boot. On 2026-11-18 COM26 advanced to the [microphone profile and self-paced calibrator](MICROPHONE_CALIBRATOR.md), extending only question capture to four seconds and adding provisional capture headroom. The manual greeting below remains available outside calibration.
 
 For one cloud greeting, use USB serial:
 

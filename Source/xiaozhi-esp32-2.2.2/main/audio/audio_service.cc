@@ -3,6 +3,7 @@
 #include <cstring>
 
 #if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
+#include "local_capture_config.h"
 #include <cmath>
 #include <cstdint>
 #include <esp_heap_caps.h>
@@ -432,21 +433,33 @@ void AudioService::RunLocalCapture() {
         // before completed metadata becomes visible to the UI task.
         struct CaptureStorage {
             int16_t* data = static_cast<int16_t*>(heap_caps_malloc(
-                LocalPcmCaptureBuffer::kBufferBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+                companion_capture::kBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
             ~CaptureStorage() {
                 if (data != nullptr) {
                     volatile int16_t* wipe = data;
-                    for (size_t i = 0; i < LocalPcmCaptureBuffer::kTargetSamples; ++i) {
+                    for (size_t i = 0; i < companion_capture::kSamples; ++i) {
                         wipe[i] = 0;
                     }
                     heap_caps_free(data);
                 }
             }
         } storage;
-        LocalPcmCaptureBuffer capture(storage.data, LocalPcmCaptureBuffer::kTargetSamples);
+        LocalPcmCaptureBuffer capture(storage.data, companion_capture::kSamples, companion_capture::kSamples);
+#if CONFIG_COMPANION_MICROPHONE_PREP
+        struct RawChunk {
+            std::unique_ptr<int32_t[]> data{new (std::nothrow) int32_t[320]};
+            ~RawChunk() { if (data) { volatile int32_t* wipe = data.get(); for (unsigned i = 0; i < 320; ++i) wipe[i] = 0; } }
+        } raw;
+        microphone_pcm::Headroom headroom(companion_capture::kPcmShift);
+        bool recording_reported = false;
+#endif
         LocalPcmCaptureStatus status = LocalPcmCaptureStatus::Success;
         if (!capture.valid()) {
             status = LocalPcmCaptureStatus::AllocationFailed;
+#if CONFIG_COMPANION_MICROPHONE_PREP
+        } else if (!raw.data) {
+            status = LocalPcmCaptureStatus::AllocationFailed;
+#endif
         } else if (codec_ == nullptr || codec_->input_sample_rate() != LocalPcmCaptureBuffer::kSampleRate ||
                    codec_->input_channels() != 1) {
             status = LocalPcmCaptureStatus::UnsupportedFormat;
@@ -469,13 +482,17 @@ void AudioService::RunLocalCapture() {
                 if (status != LocalPcmCaptureStatus::Success) {
                     break;
                 }
-                if (esp_timer_get_time() - started_us >= 3500000) {
+                if (esp_timer_get_time() - started_us >= companion_capture::kWorkerTimeoutMs * 1000LL) {
                     status = LocalPcmCaptureStatus::Timeout;
                     break;
                 }
                 const size_t requested = std::min<size_t>(320, capture.remaining_input_samples());
                 size_t received = 0;
+#if CONFIG_COMPANION_MICROPHONE_PREP
+                const esp_err_t read_result = codec_->ReadLocalCaptureRaw(raw.data.get(), requested, received, 100);
+#else
                 const esp_err_t read_result = codec_->ReadLocalCaptureInput(chunk, requested, received, 100);
+#endif
                 if (read_result == ESP_ERR_NOT_SUPPORTED) {
                     status = LocalPcmCaptureStatus::UnsupportedFormat;
                     break;
@@ -489,6 +506,18 @@ void AudioService::RunLocalCapture() {
                     break;
                 }
                 if (received > 0) {
+#if CONFIG_COMPANION_MICROPHONE_PREP
+                    const auto discard = std::min(received, capture.discard_remaining());
+                    if (!recording_reported && discard < received) {
+                        recording_reported = true;
+                        ESP_LOGI("MicrophonePrep", "RECORDING request=%lu duration_ms=%u",
+                            static_cast<unsigned long>(request_id), companion_capture::kDurationMs);
+                    }
+                    for (size_t i = 0; i < received; ++i) {
+                        chunk[i] = microphone_pcm::Convert(raw.data[i], companion_capture::kPcmShift);
+                        if (i >= discard) headroom.Feed(raw.data[i]);
+                    }
+#endif
                     capture.Feed(chunk, received);
                     last_input_time_ = std::chrono::steady_clock::now();
                     ++debug_statistics_.input_count;
@@ -497,13 +526,16 @@ void AudioService::RunLocalCapture() {
                     // watchdog/cancel request; do not terminate the input task.
                     vTaskDelay(pdMS_TO_TICKS(1));
                 }
-                if (esp_timer_get_time() - started_us >= 3500000) {
+                if (esp_timer_get_time() - started_us >= companion_capture::kWorkerTimeoutMs * 1000LL) {
                     status = LocalPcmCaptureStatus::Timeout;
                     break;
                 }
             }
         }
         result = capture.Result(request_id, status, static_cast<uint32_t>((esp_timer_get_time() - started_us) / 1000));
+#if CONFIG_COMPANION_MICROPHONE_PREP
+        result.microphone = headroom.Result();
+#endif
     }
 
     std::lock_guard<std::mutex> lock(local_capture_mutex_);

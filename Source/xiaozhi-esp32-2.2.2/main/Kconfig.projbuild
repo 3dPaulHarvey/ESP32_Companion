@@ -35,6 +35,23 @@ config COMPANION_GEMINI_VOICE_PROBE
         Receive one fixed greeting, close the cloud connection, then play
         bounded 24 kHz PCM through the existing output task. No audio upload.
 
+config COMPANION_MICROPHONE_PREP
+    bool "Companion local microphone preparation"
+    depends on COMPANION_GEMINI_VOICE_PROBE
+    default n
+    help
+        Use four-second local captures and measure raw I2S headroom before
+        conversion. Wake-word gain is unchanged; microphone audio is not uploaded.
+
+config COMPANION_MICROPHONE_SHIFT
+    int "Local capture PCM right shift"
+    depends on COMPANION_MICROPHONE_PREP
+    range 12 18
+    default 14
+    help
+        Fixed capture-only conversion gain. Each extra bit adds approximately
+        6 dB of digital headroom. Existing wake-word conversion remains at 12.
+
 config OTA_URL
     string "Default OTA URL"
     default "https://api.tenclass.net/xiaozhi/ota/"

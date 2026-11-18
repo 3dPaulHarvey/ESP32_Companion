@@ -18,10 +18,26 @@ from check_device_auth import load_token
 
 
 EXPECTED_MAC = "44:bd:8d:ec:38:e0"
+CAPTURE_POLICY = (r"LocalCompanion: CAPTURE_POLICY samples=(\d+) bytes=(\d+) duration_ms=(\d+) "
+    r"sample_rate=16000 worker_timeout_ms=(\d+) pcm_shift=(\d+)")
 
 
 class CheckFailure(Exception):
     pass
+
+
+def capture_policy(text):
+    match = re.search(CAPTURE_POLICY, text)
+    if not match:
+        if "LocalCompanion: CAPTURE_POLICY " in text:
+            raise CheckFailure("The capture policy did not match the controlled contract.")
+        return {"samples": 32000, "bytes": 64000, "duration_ms": 2000, "worker_timeout_ms": 3500, "pcm_shift": 12}
+    values = dict(zip(["samples", "bytes", "duration_ms", "worker_timeout_ms", "pcm_shift"], map(int, match.groups())))
+    if (values["samples"] not in {32000, 64000} or values["bytes"] != values["samples"] * 2 or
+        values["duration_ms"] != values["samples"] // 16 or values["worker_timeout_ms"] != values["duration_ms"] + 1500 or
+        not 12 <= values["pcm_shift"] <= 18):
+        raise CheckFailure("The capture policy failed size/timing/gain checks.")
+    return values
 
 
 class Device:
@@ -37,6 +53,7 @@ class Device:
         self.checks = []
         self.heaps = []
         self.credential = None
+        self.capture = capture_policy("")
 
     def read(self):
         chunk = self.connection.read(self.connection.in_waiting or 1)
@@ -81,10 +98,23 @@ class Device:
         match = self.wait(r"CompanionSession: PROTOCOL version=1 mac=([0-9a-f:]+) configured=([01]) busy=([01])", start, timeout=20)
         if match[1] != EXPECTED_MAC:
             raise CheckFailure("The serial device is not the verified development ESP32; no provisioning allowed.")
+        self.capture = capture_policy(self.text[start:])
         heap = re.search(r"HardwareDiagnostics: HEAP internal_free=(\d+) internal_min=(\d+) internal_largest=(\d+) psram_total=(\d+) psram_free=(\d+)", self.text[start:])
         if heap:
             self.heaps.append(dict(zip(["internal_free", "internal_min", "internal_largest", "psram_total", "psram_free"], map(int, heap.groups()))))
         return int(match[2]), int(match[3])
+
+    def wait_local_capture(self, start, source="serial"):
+        match = self.wait(r"LocalCompanion: CAPTURE_COMPLETE request=(\d+) samples=(\d+) bytes=(\d+) duration_ms=(\d+) "
+            r"sample_rate=16000 elapsed_ms=(\d+) rms=(\d+) peak=(\d+) clipped=(\d+)", start, timeout=12)
+        values = dict(zip(["request", "samples", "bytes", "duration_ms", "elapsed_ms", "rms", "peak", "clipped"], map(int, match.groups())))
+        if any(values[key] != self.capture[key] for key in ["samples", "bytes", "duration_ms"]):
+            raise CheckFailure("Local capture did not match its advertised exact sample count.")
+        if (not values["duration_ms"] - 200 <= values["elapsed_ms"] < self.capture["worker_timeout_ms"] or
+            not 0 <= values["rms"] <= values["peak"] <= 32768 or values["clipped"] > values["samples"]):
+            raise CheckFailure("Local capture timing/sample metrics are invalid.")
+        self.wait(r"LocalCompanion: CYCLE_COMPLETE cycle=" + str(values["request"]) + r" .*source=" + source, start)
+        return values
 
     def probe(self, command, kind, http, ok, reason="verified", overlap_capture=False, reject_busy=False):
         start = self.send((b"n" if overlap_capture else b"") + command * (2 if reject_busy else 1))
@@ -97,8 +127,7 @@ class Device:
         if reject_busy:
             self.wait(r"CompanionSession: REQUEST_REJECTED reason=busy", start)
         if overlap_capture:
-            self.wait(r"LocalCompanion: CAPTURE_COMPLETE request=\d+ samples=32000 bytes=64000 .*sample_rate=16000", start)
-            self.wait(r"LocalCompanion: CYCLE_COMPLETE .*source=serial", start)
+            self.wait_local_capture(start)
         self.passed(f"device {kind}: HTTP {http}, {reason}", http=http, elapsed_ms=int(match[7]), busy_guard=reject_busy, local_capture_verified=overlap_capture)
 
 
@@ -157,8 +186,7 @@ def main():
         device.wait(r"HardwareDiagnostics: WIFI off; wake remains local;", start)
         device.probe(b"g", "session", 0, False, reason="wifi_required")
         start = device.send(b"n")
-        device.wait(r"LocalCompanion: CAPTURE_COMPLETE request=\d+ samples=32000 bytes=64000", start)
-        device.wait(r"LocalCompanion: CYCLE_COMPLETE .*source=serial", start)
+        device.wait_local_capture(start)
         device.passed("local capture/cue/idle recovery with Wi-Fi off")
         configured, busy = device.protocol()
         if not configured or busy:

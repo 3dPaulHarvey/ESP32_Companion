@@ -16,6 +16,10 @@ protected:
 
 public:
     virtual ~NoAudioCodec();
+#if CONFIG_COMPANION_MICROPHONE_PREP
+    esp_err_t ReadLocalCaptureRaw(int32_t* data, size_t capacity_samples,
+                                size_t& samples_read, uint32_t timeout_ms) override;
+#endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
     esp_err_t WriteDiagnosticPcm(const int16_t* data, size_t samples,
                                 size_t& written, uint32_t timeout_ms) override;
@@ -42,6 +46,12 @@ public:
     NoAudioCodecSimplexPdm(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, gpio_num_t mic_sck,  gpio_num_t mic_din);
     NoAudioCodecSimplexPdm(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, i2s_std_slot_mask_t spk_slot_mask, gpio_num_t mic_sck,  gpio_num_t mic_din);
     int Read(int16_t* dest, int samples);
+#if CONFIG_COMPANION_MICROPHONE_PREP
+    esp_err_t ReadLocalCaptureRaw(int32_t* data, size_t capacity_samples,
+                                size_t& samples_read, uint32_t timeout_ms) override {
+        return AudioCodec::ReadLocalCaptureRaw(data, capacity_samples, samples_read, timeout_ms);
+    }
+#endif
 #if CONFIG_COMPANION_HARDWARE_DIAGNOSTICS
     // This PDM variant reads native int16 data and cannot use the base class's
     // finite 32-bit I2S conversion path.

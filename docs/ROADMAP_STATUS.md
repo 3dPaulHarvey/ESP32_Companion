@@ -1,6 +1,6 @@
 # Companion roadmap progress
 
-Updated 2026-11-17. Current checkpoint: **Phase 4c, manual Gemini speech through the development robot's speaker**. The user confirms clear speech, normal speed, speaking animation and READY recovery. The original working robot and reference repository remain separate.
+Updated 2026-11-18. Current checkpoint: **Phase 4d, self-paced microphone calibrator ready; awaiting user-run measurements**. Phase 4c's manual Gemini speaker output passed. The original working robot and reference repository remain separate.
 
 | Roadmap phase | Status and evidence |
 |---|---|
@@ -11,9 +11,10 @@ Updated 2026-11-17. Current checkpoint: **Phase 4c, manual Gemini speech through
 | 4a: ESP32 session request | Passed: private NVS provisioning, HTTPS rejection/success and local work during requests. [Session checkpoint](ESP32_SESSIONS.md) |
 | 4b: ESP32 Gemini setup | Passed: direct secure setup acknowledgment and normal closure. [Setup checkpoint](ESP32_GEMINI_SETUP.md) |
 | 4c: ESP32 speaker output | Passed: fixed text greeting -> bounded Gemini PCM -> existing speaker -> READY. [Current voice checkpoint](ESP32_VOICE.md) |
-| 4: complete manual microphone turn | Next: calibrate/lengthen local microphone capture, then verify a spoken question and correct audible answer from the ESP32. |
+| 4d: microphone preparation | Four-second capture and standalone autosaving Windows calibrator built, flashed and integration-tested. Human quiet/speech calibration pending. [Run the calibrator](MICROPHONE_CALIBRATOR.md) |
+| 4: complete manual microphone turn | Next after saved calibration review: verify a spoken question and correct audible answer from the ESP32. |
 | 5: wake and follow-up conversation | Pending: connect cloud audio to wake, follow-up listening, quiet timeout, re-wake, and repeated recovery checks. |
 
-The next small gate is **microphone preparation**, not changing Cloudflare. The current two-second capture is shorter than the successful 2.41-second desktop question fixture. Use quiet/normal-voice measurements to choose input headroom and a bounded capture length, then verify local capture before uploading a question. Keep cloud speech manual until that complete turn is verified.
+The next small gate is the user's **self-paced microphone calibration**. COM26 now uses a four-second local capture with provisional capture shift 14; wake recognition keeps shift 12. The clickable app lets the user start each quiet/speech sample, Keep/Redo it, autosave and close. Review its saved numeric measurements before choosing final headroom and uploading a question. Earlier two-second attempts had missed speaking windows and do not establish a completed calibration. Cloud speech remains manual until a complete microphone turn is verified.
 
 The first finished companion milestone still requires **wake -> spoken question -> spoken answer -> follow-up -> answer -> idle -> wake again**. Fixed speaker playback establishes one part of that path. Extended uptime, live audio streaming, interruption handling and broader network-fault tests remain open.

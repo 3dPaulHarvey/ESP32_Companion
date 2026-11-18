@@ -44,6 +44,9 @@ const char* KindName(Kind kind) {
     return kind == Kind::Session ? "session" : kind == Kind::Wrong ? "wrong" : kind == Kind::Missing ? "missing" : kind == Kind::Gemini ? "gemini" : "voice";
 }
 std::atomic<bool> busy{false};
+#if CONFIG_COMPANION_MICROPHONE_PREP
+std::atomic<bool> calibration_guard{false};
+#endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
 std::atomic<CompanionSessionProbe::VoiceStage> voice_stage{CompanionSessionProbe::VoiceStage::Idle};
 #endif
@@ -279,6 +282,9 @@ Result Perform(Kind kind) {
 }
 
 bool Request(Kind kind) {
+#if CONFIG_COMPANION_MICROPHONE_PREP
+    if (calibration_guard.load()) { ESP_LOGW(kTag, "REQUEST_REJECTED reason=calibrator_owned"); return false; }
+#endif
     if (esp_timer_get_time() < retry_until_us.load()) { ESP_LOGW(kTag, "REQUEST_REJECTED reason=retry_window"); return false; }
     bool expected = false;
     if (!busy.compare_exchange_strong(expected, true)) { ESP_LOGW(kTag, "REQUEST_REJECTED reason=busy"); return false; }
@@ -332,6 +338,10 @@ bool Request(Kind kind) {
 }  // namespace
 
 namespace CompanionSessionProbe {
+#if CONFIG_COMPANION_MICROPHONE_PREP
+bool IsBusy() { return busy.load(); }
+void SetCalibrationGuard(bool active) { calibration_guard.store(active); }
+#endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
 bool RequestVoice() {
     if (!WifiManager::GetInstance().IsConnected()) { ESP_LOGW("CompanionVoice", "REQUEST_REJECTED reason=wifi_required"); return false; }

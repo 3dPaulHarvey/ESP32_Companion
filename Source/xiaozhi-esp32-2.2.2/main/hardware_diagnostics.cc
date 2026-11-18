@@ -8,6 +8,8 @@
 #include "display.h"
 #include "local_companion_cycle.h"
 #include "audio/local_pcm_capture.h"
+#include "audio/local_capture_config.h"
+#include "audio/calibration_lease.h"
 #if CONFIG_COMPANION_SESSION_PROBE
 #include "companion/session_probe.h"
 #endif
@@ -96,6 +98,16 @@ void PrintHelp() {
     ESP_LOGI(kTag, "COMMANDS h=help n=synthetic-cycle x=cancel-capture d=face-cycle t=local-cue w=WiFi-start o=WiFi-off r=disconnect/retry s=status");
 }
 
+void PrintCapturePolicy() {
+    ESP_LOGI("LocalCompanion", "CAPTURE_POLICY samples=%u bytes=%u duration_ms=%u sample_rate=16000 worker_timeout_ms=%u pcm_shift=%u",
+        static_cast<unsigned>(companion_capture::kSamples), static_cast<unsigned>(companion_capture::kBytes),
+        companion_capture::kDurationMs, companion_capture::kWorkerTimeoutMs, companion_capture::kPcmShift);
+#if CONFIG_COMPANION_MICROPHONE_PREP
+    ESP_LOGI("MicrophonePrep", "FEATURE enabled=1 capture_only=1 wake_shift=12 audio_upload=0");
+    ESP_LOGI("MicrophonePrep", "CALIBRATOR_PROTOCOL version=1 lease_ms=10000 recording_event=1");
+#endif
+}
+
 const char* WifiEventName(WifiEvent event) {
     switch (event) {
         case WifiEvent::Scanning: return "scanning";
@@ -163,6 +175,7 @@ const char* WifiEventName(WifiEvent event) {
         ? ESP_OK : ESP_FAIL);
     PrintHelp();
     PrintMemory();
+    PrintCapturePolicy();
     ESP_LOGI(kTag, "WAKE_READY count=0 phrase=Hi,ESP WiFi=off cloud=%s", kCloudMode);
 #if CONFIG_COMPANION_SESSION_PROBE
     CompanionSessionProbe::Initialize();
@@ -175,7 +188,7 @@ const char* WifiEventName(WifiEvent event) {
     std::atomic<bool> wifi_stop_complete{false};
     esp_event_handler_instance_t stop_handler = nullptr;
     uint32_t handled_wakes = 0;
-    LocalCompanionCycle cycle;
+    LocalCompanionCycle cycle(companion_capture::kControllerTimeoutUs);
     uint32_t voice_cycles = 0;
     uint32_t serial_cycles = 0;
     const char* cycle_source = "none";
@@ -185,6 +198,7 @@ const char* WifiEventName(WifiEvent event) {
     bool capture_request_pending = false;
     bool capture_start_failed = false;
     bool wake_armed = true;
+    MicrophoneCalibrationLease calibration_lease;
     bool manual_voice_active = false;
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
     bool manual_voice_speaking = false;
@@ -192,10 +206,10 @@ const char* WifiEventName(WifiEvent event) {
     uint32_t capture_request_id = 0;
     uint32_t completed_reported = 0;
     const char* abort_reason = "none";
-    ESP_LOGI("LocalCompanion", "STATE IDLE mode=bounded-pcm-capture capture=local-2s cloud=%s", kCloudMode);
+    ESP_LOGI("LocalCompanion", "STATE IDLE mode=bounded-pcm-capture capture=%s cloud=%s", companion_capture::kLabel, kCloudMode);
 
     auto arm_wake = [&]() {
-        if (!capture_request_pending && !manual_voice_active && !wake_armed) {
+        if (!capture_request_pending && !manual_voice_active && !calibration_lease.held() && !wake_armed) {
             audio.EnableWakeWordDetection(true);
             wake_armed = true;
             ESP_LOGI(kTag, "WAKE_READY count=%lu WiFi=%s cloud=%s",
@@ -220,8 +234,9 @@ const char* WifiEventName(WifiEvent event) {
                 capture_request_pending = audio.BeginLocalCapture(capture_request_id);
                 capture_start_failed = !capture_request_pending;
                 if (capture_request_pending) {
-                    ESP_LOGI("LocalCompanion", "CAPTURE_BEGIN request=%lu target_samples=32000 bytes=64000 sample_rate=16000 warmup_samples=3200",
-                        static_cast<unsigned long>(capture_request_id));
+                    ESP_LOGI("LocalCompanion", "CAPTURE_BEGIN request=%lu target_samples=%u bytes=%u sample_rate=16000 warmup_samples=3200",
+                        static_cast<unsigned long>(capture_request_id), static_cast<unsigned>(companion_capture::kSamples),
+                        static_cast<unsigned>(companion_capture::kBytes));
                 } else {
                     ESP_LOGE("LocalCompanion", "CAPTURE_START_FAILED request=%lu", static_cast<unsigned long>(capture_request_id));
                 }
@@ -249,7 +264,7 @@ const char* WifiEventName(WifiEvent event) {
     };
     auto begin_cycle = [&](int64_t now, const char* source) {
         const auto previous = cycle.state();
-        if (manual_voice_active || capture_request_pending || !cycle.BeginWake(now)) {
+        if (manual_voice_active || (source[0] == 'v' && calibration_lease.held()) || capture_request_pending || !cycle.BeginWake(now)) {
             ESP_LOGI("LocalCompanion", "WAKE_IGNORED source=%s state=%s", source,
                 LocalCompanionCycle::StateName(cycle.state()));
             return;
@@ -264,6 +279,13 @@ const char* WifiEventName(WifiEvent event) {
         const int64_t now = esp_timer_get_time();
 #if CONFIG_COMPANION_SESSION_PROBE
         CompanionSessionProbe::Poll(now);
+#endif
+#if CONFIG_COMPANION_MICROPHONE_PREP
+        if (calibration_lease.Expire(now)) {
+            CompanionSessionProbe::SetCalibrationGuard(false);
+            if (cycle.state() == LocalCompanionState::Idle) arm_wake();
+            ESP_LOGI("MicrophonePrep", "CALIBRATOR_RELEASE reason=lease_expired wake_armed=%d", wake_armed);
+        }
 #endif
         if (wifi_stop_pending && wifi_stop_complete.exchange(false, std::memory_order_acquire)) {
             wifi_active = false;
@@ -295,13 +317,28 @@ const char* WifiEventName(WifiEvent event) {
             if (cycle.state() == LocalCompanionState::Listening && capture_result.request_id == cycle.started()) {
                 const auto previous_capture_state = cycle.state();
                 const bool valid = capture_result.success && capture_result.status == LocalPcmCaptureStatus::Success
-                    && capture_result.samples == 32000 && capture_result.sample_rate == 16000;
+                    && capture_result.samples == companion_capture::kSamples && capture_result.sample_rate == 16000;
                 if (valid && cycle.CaptureFinished(now)) {
-                    ESP_LOGI("LocalCompanion", "CAPTURE_COMPLETE request=%lu samples=%lu bytes=%lu duration_ms=2000 sample_rate=16000 elapsed_ms=%lu rms=%lu peak=%ld clipped=%lu",
+                    ESP_LOGI("LocalCompanion", "CAPTURE_COMPLETE request=%lu samples=%lu bytes=%lu duration_ms=%u sample_rate=16000 elapsed_ms=%lu rms=%lu peak=%ld clipped=%lu",
                         static_cast<unsigned long>(capture_result.request_id), static_cast<unsigned long>(capture_result.samples),
                         static_cast<unsigned long>(capture_result.samples * sizeof(int16_t)),
+                        companion_capture::kDurationMs,
                         static_cast<unsigned long>(capture_result.elapsed_ms), static_cast<unsigned long>(capture_result.rms),
                         static_cast<long>(capture_result.peak), static_cast<unsigned long>(capture_result.clipped));
+#if CONFIG_COMPANION_MICROPHONE_PREP
+                    const auto& microphone = capture_result.microphone;
+                    ESP_LOGI("MicrophonePrep", "HEADROOM request=%lu samples=%lu pcm_shift=%u raw_peak=%lu legacy_clipped=%lu raw_near_full_scale=%lu suggested_shift=%u dc_mean=%ld ac_rms=%lu",
+                        static_cast<unsigned long>(capture_result.request_id), static_cast<unsigned long>(microphone.samples),
+                        microphone.pcm_shift, static_cast<unsigned long>(microphone.raw_peak),
+                        static_cast<unsigned long>(microphone.legacy_clipped), static_cast<unsigned long>(microphone.raw_near_full_scale),
+                        microphone.suggested_shift, static_cast<long>(microphone.dc_mean), static_cast<unsigned long>(microphone.ac_rms));
+                    for (unsigned i = 0; i < microphone.window_samples.size(); ++i) {
+                        ESP_LOGI("MicrophonePrep", "WINDOW request=%lu second=%u samples=%lu rms=%lu peak=%lu clipped=%lu",
+                            static_cast<unsigned long>(capture_result.request_id), i + 1,
+                            static_cast<unsigned long>(microphone.window_samples[i]), static_cast<unsigned long>(microphone.window_rms[i]),
+                            static_cast<unsigned long>(microphone.window_peak[i]), static_cast<unsigned long>(microphone.window_clipped[i]));
+                    }
+#endif
                     on_transition(previous_capture_state);
                 } else {
                     abort_reason = valid ? "controller-timeout" : (capture_result.success ? "invalid-result" : LocalPcmCaptureStatusName(capture_result.status));
@@ -351,9 +388,29 @@ const char* WifiEventName(WifiEvent event) {
             }
 #endif
             switch (command) {
+#if CONFIG_COMPANION_MICROPHONE_PREP
+                case '[':
+                    if (cycle.state() == LocalCompanionState::Idle && !capture_request_pending && !manual_voice_active && !CompanionSessionProbe::IsBusy()) {
+                        calibration_lease.Hold(now);
+                        CompanionSessionProbe::SetCalibrationGuard(true);
+                        audio.EnableWakeWordDetection(false); wake_armed = false;
+                        face_step = 0;
+                        ESP_LOGI("MicrophonePrep", "CALIBRATOR_CONTROL hold=1 lease_ms=10000");
+                    } else ESP_LOGW("MicrophonePrep", "CALIBRATOR_REJECTED reason=busy");
+                    break;
+                case '=':
+                    calibration_lease.Heartbeat(now);
+                    break;
+                case ']':
+                    calibration_lease.Release();
+                    CompanionSessionProbe::SetCalibrationGuard(false);
+                    if (cycle.state() == LocalCompanionState::Idle) arm_wake();
+                    ESP_LOGI("MicrophonePrep", "CALIBRATOR_CONTROL hold=0 wake_armed=%d", wake_armed);
+                    break;
+#endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
                 case 'v':
-                    if (manual_voice_active || cycle.state() != LocalCompanionState::Idle || capture_request_pending || face_step || !audio.IsIdle()) {
+                    if (calibration_lease.held() || manual_voice_active || cycle.state() != LocalCompanionState::Idle || capture_request_pending || face_step || !audio.IsIdle()) {
                         ESP_LOGW("CompanionVoice", "REQUEST_REJECTED reason=local_busy");
                     } else if (CompanionSessionProbe::RequestVoice()) {
                         manual_voice_active = true; manual_voice_speaking = false;
@@ -375,16 +432,17 @@ const char* WifiEventName(WifiEvent event) {
                     break;
                 case 's':
                     PrintMemory();
+                    PrintCapturePolicy();
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
                     ESP_LOGI("CompanionVoice", "STATUS active=%d speaking=%d wake_armed=%d playback_busy=%d",
                         manual_voice_active, manual_voice_speaking, wake_armed, audio.IsDiagnosticPcmBusy());
 #endif
                     ESP_LOGI(kTag, "STATUS wakes=%lu WiFi=%s connected=%d cloud=%s",
                         static_cast<unsigned long>(handled_wakes), wifi_active ? "on" : "off", wifi.IsConnected(), kCloudMode);
-                    ESP_LOGI("LocalCompanion", "STATUS state=%s started=%lu completed=%lu voice_started=%lu serial_started=%lu aborted=%lu capture=local-2s pending=%d",
+                    ESP_LOGI("LocalCompanion", "STATUS state=%s started=%lu completed=%lu voice_started=%lu serial_started=%lu aborted=%lu capture=%s pending=%d",
                         LocalCompanionCycle::StateName(cycle.state()), static_cast<unsigned long>(cycle.started()),
                         static_cast<unsigned long>(cycle.completed()), static_cast<unsigned long>(voice_cycles),
-                        static_cast<unsigned long>(serial_cycles), static_cast<unsigned long>(cycle.aborted()), capture_request_pending);
+                        static_cast<unsigned long>(serial_cycles), static_cast<unsigned long>(cycle.aborted()), companion_capture::kLabel, capture_request_pending);
 #if CONFIG_COMPANION_SESSION_PROBE
                     CompanionSessionProbe::PrintStatus();
 #endif

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include "microphone_pcm.h"
 
 enum class LocalPcmCaptureStatus {
     Success,
@@ -38,6 +39,7 @@ struct LocalPcmCaptureResult {
     std::uint32_t clipped = 0;
     std::uint32_t elapsed_ms = 0;
     std::uint32_t sample_rate = 16000;
+    microphone_pcm::Metrics microphone{};
 };
 
 // Pure bounded accumulator over caller-owned storage. The audio input task is
@@ -48,19 +50,24 @@ public:
     static constexpr std::size_t kTargetSamples = 32000;
     static constexpr std::size_t kDiscardSamples = 3200;
     static constexpr std::size_t kBufferBytes = kTargetSamples * sizeof(std::int16_t);
+    static constexpr std::size_t kMaximumSamples = 64000;
 
-    LocalPcmCaptureBuffer(std::int16_t* storage, std::size_t capacity)
-        : storage_(storage), capacity_(capacity) {}
+    constexpr LocalPcmCaptureBuffer(std::int16_t* storage, std::size_t capacity,
+                                   std::size_t target_samples = kTargetSamples, std::size_t discard_samples = kDiscardSamples)
+        : storage_(storage), capacity_(capacity), target_(target_samples), discard_target_(discard_samples),
+          discard_remaining_(discard_samples) {}
 
-    bool valid() const { return storage_ != nullptr && capacity_ >= kTargetSamples; }
-    bool complete() const { return samples_ == kTargetSamples; }
-    std::size_t remaining_input_samples() const {
-        return discard_remaining_ + kTargetSamples - samples_;
+    constexpr bool valid() const { return storage_ != nullptr && target_ > 0 && target_ <= kMaximumSamples &&
+        discard_target_ <= kDiscardSamples && capacity_ >= target_; }
+    constexpr bool complete() const { return valid() && samples_ == target_; }
+    constexpr std::size_t discard_remaining() const { return discard_remaining_; }
+    constexpr std::size_t remaining_input_samples() const {
+        return valid() ? discard_remaining_ + target_ - samples_ : 0;
     }
 
     // Includes the initial discard in consumed input, never in stored samples
     // or statistics. Ignore overshoot after the fixed-size segment is full.
-    std::size_t Feed(const std::int16_t* input, std::size_t count) {
+    constexpr std::size_t Feed(const std::int16_t* input, std::size_t count) {
         if (!valid() || input == nullptr) {
             return 0;
         }
@@ -68,7 +75,7 @@ public:
         discard_remaining_ -= discarded;
         input += discarded;
         count -= discarded;
-        const std::size_t stored = std::min(count, kTargetSamples - samples_);
+        const std::size_t stored = std::min(count, target_ - samples_);
         for (std::size_t i = 0; i < stored; ++i) {
             const std::int32_t value = input[i];
             const std::int32_t magnitude = value < 0 ? -value : value;
@@ -105,7 +112,7 @@ public:
                 data[i] = 0;
             }
         }
-        discard_remaining_ = kDiscardSamples;
+        discard_remaining_ = discard_target_;
         samples_ = 0;
         square_sum_ = 0;
         peak_ = 0;
@@ -115,7 +122,8 @@ public:
 private:
     std::int16_t* storage_;
     std::size_t capacity_;
-    std::size_t discard_remaining_ = kDiscardSamples;
+    std::size_t target_, discard_target_;
+    std::size_t discard_remaining_;
     std::size_t samples_ = 0;
     std::uint64_t square_sum_ = 0;
     std::int32_t peak_ = 0;

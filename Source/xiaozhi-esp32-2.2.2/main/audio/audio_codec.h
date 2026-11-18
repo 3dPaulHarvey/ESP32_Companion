@@ -45,6 +45,13 @@ public:
         return ESP_ERR_NOT_SUPPORTED;
     }
 #endif
+#if CONFIG_COMPANION_MICROPHONE_PREP
+    virtual esp_err_t ReadLocalCaptureRaw(int32_t* data, size_t capacity_samples,
+                                        size_t& samples_read, uint32_t timeout_ms) {
+        (void)data; (void)capacity_samples; (void)timeout_ms; samples_read = 0;
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+#endif
     virtual void Start();
 
     inline bool duplex() const { return duplex_; }

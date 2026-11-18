@@ -312,6 +312,18 @@ esp_err_t NoAudioCodec::ReadLocalCaptureInput(int16_t* dest, size_t capacity_sam
 }
 #endif
 
+#if CONFIG_COMPANION_MICROPHONE_PREP
+esp_err_t NoAudioCodec::ReadLocalCaptureRaw(int32_t* dest, size_t capacity_samples,
+                                          size_t& samples_read, uint32_t timeout_ms) {
+    samples_read = 0;
+    if (!dest || !capacity_samples || capacity_samples > 320 || timeout_ms > 100) return ESP_ERR_INVALID_ARG;
+    size_t bytes = 0;
+    const auto error = i2s_channel_read(rx_handle_, dest, capacity_samples * sizeof(int32_t), &bytes, timeout_ms);
+    samples_read = std::min(bytes / sizeof(int32_t), capacity_samples);
+    return bytes % sizeof(int32_t) ? ESP_FAIL : error;
+}
+#endif
+
 // Delegating constructor: calls the main constructor with default slot mask
 NoAudioCodecSimplexPdm::NoAudioCodecSimplexPdm(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, gpio_num_t mic_sck, gpio_num_t mic_din) 
     : NoAudioCodecSimplexPdm(input_sample_rate, output_sample_rate, spk_bclk, spk_ws, spk_dout, I2S_STD_SLOT_LEFT, mic_sck, mic_din) {

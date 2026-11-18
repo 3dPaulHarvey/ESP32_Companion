@@ -1,10 +1,12 @@
 # Bounded local microphone capture
 
+**Current COM26 update, 2026-11-18:** the separate `microphone` profile extends capture to four seconds / 64,000 samples / 128,000 bytes, with provisional capture shift 14 and unchanged wake shift 12. Its standalone Windows app provides user-paced quiet/speech tests and autosaves results for later review. Human calibration remains pending. [Open the calibrator](MICROPHONE_CALIBRATOR.md). The two-second behavior and commands below document the preceding profiles.
+
 Phase 2b replaces the timed LISTENING rehearsal with a real, bounded PCM segment. It uses the existing audio input task and board/codec. The diagnostic profile still starts with Wi-Fi off and no cloud protocol.
 
 Status: built and flashed on COM26. Automated capture/cancellation checks and three voice-triggered captures passed in serial. After the steady-pose/status-label correction, the user reports that the recent physical test is working well (2026-11-17). This confirms the interaction at the device; no new serial capture or exact cycle count was supplied for that follow-up. Microphone gain/headroom calibration remains open before voice streaming. Independent local Worker preparation can proceed meanwhile.
 
-The current [voice profile](ESP32_VOICE.md) retains this exact local capture path; its separate manual greeting sends only fixed text. Phase 4a additionally verified a serial-triggered capture/cue cycle during an HTTPS session request and user-confirmed eyes/wake/listening/cue. Captured PCM is still not handed to the network.
+The preceding [voice profile](ESP32_VOICE.md) retains this two-second local capture path; its separate manual greeting sends only fixed text. Phase 4a additionally verified a serial-triggered capture/cue cycle during an HTTPS session request and user-confirmed eyes/wake/listening/cue. Captured PCM is still not handed to the network in either profile.
 
 ## Interaction
 

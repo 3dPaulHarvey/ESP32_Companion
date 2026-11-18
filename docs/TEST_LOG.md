@@ -489,3 +489,34 @@ After that fix, the robot received and played 99,360 bytes / 49,680 samples (2.0
 Application SHA256: `86bc5d34032b3bae0f13819888441fd0f833af5b6d88fde98a01de46dbb6340f`. Final evidence: ignored `logs/esp32-voice-preflash.json`, `esp32-voice-build-metadata-fix.log`, `esp32-voice-flash-metadata-fix.log`, `esp32-voice-listener-replay.log`, `esp32-voice-final-hardware-verified.log`, `esp32-voice-existing-gemini-regression.log`, `esp32-voice-gemini-regression-final.log`, `esp32-voice-host-tests.json` and `esp32-voice-physical-followup.json`. Earlier controlled failure evidence remains in `esp32-voice-first-hardware-check.log` and `esp32-voice-hardware-verified.log`; only bounded metadata is retained. The desktop shape diagnostic stores only whitelisted type names/counts, never provider values or PCM.
 
 **Phase 4c manual speaker checkpoint passed.** This proves fixed-text-to-Gemini-to-robot speech, not microphone-to-cloud conversation. Whole-turn buffering is deliberate for this first output test; a streaming ring buffer, extended audio/network stability, live microphone upload and follow-up sessions remain later work. The next small gate is microphone headroom and a capture window longer than the current two seconds before one manual spoken question/answer. See [ESP32_VOICE.md](ESP32_VOICE.md) and [ROADMAP_STATUS.md](ROADMAP_STATUS.md).
+
+## 2026-11-18 — Phase 4d: self-paced microphone calibrator ready
+
+The user reported missed speaking windows during the short live tests and requested an independent clickable calibrator with autosave, to run without coordinating with chat. This increment delivers that Windows app, a Desktop shortcut, the root `Open Microphone Calibrator.cmd` launcher, and [user instructions](MICROPHONE_CALIBRATOR.md). **Human microphone calibration has not passed yet; it awaits the user's saved samples.**
+
+Earlier two-second baseline attempts are retained privately: quiet RMS 2,557/2,999/949 with no clipped samples; speech-window RMS 2,917/2,926/9,245, with 778 of 32,000 samples clipped in the third attempt. The user missed some windows, so these are uncontrolled observations rather than a verified normal-speech calibration. They motivate more capture headroom and a self-paced test, not a final gain decision.
+
+The new opt-in `microphone` profile captures four seconds / 64,000 samples / 128,000 bytes. Capture reads raw 32-bit I2S words and applies provisional shift 14; the proven wake conversion remains shift 12. Numeric summaries compare both conversions on the same input before clipping and include four one-second windows, raw peak, DC/AC levels and near-full-scale raw counts. The existing input task remains the sole reader. PCM and temporary raw chunks are wiped/freed before metadata publication. Worker/controller limits become 5.5/6 seconds in this profile; older profiles retain two-second behavior.
+
+The app uses manual starts, a countdown, firmware-synchronized green recording signals, Keep/Redo review, cancel, partial-session resume and automatic local saves. A single-instance lock prevents competing session writers. A serial-command allowlist excludes provisioning/cloud commands. The app temporarily holds wake detection between samples and refreshes a ten-second firmware lease; normal close or lease expiry restores local wake. Demo and UI-test results are isolated from actual user calibration.
+
+The first app integration test exposed a test-side race: it checked the saved close status as soon as the USB worker exited, before Tk processed the queued close event. The test now waits for the saved partial state. A later layout check caught an unmapped review control during the speech step. The review panel now replaces the recording controls rather than adding height below them; the final full workflow passes. Computer Use window inspection was attempted twice, but its native pipe was unavailable (`The system cannot find the file specified`, OS error 2). No visual inspection was claimed; Tk layout bounds and the real event loop were checked directly by the app integration test.
+
+| Final check | Observed result |
+|---|---|
+| Recovery | PASS: private pre-change 8 MB backup verified before writing; original backup retained |
+| Build/flash | PASS: microphone app 2,575,840 bytes, about 16% app-partition space free; development MAC guarded; all write hashes verified |
+| Compile-time policy | PASS: 91 assertions (24 session, 16 setup, 32 output, 19 microphone/lease) |
+| Host tests | PASS: 45 tests (11 session, six setup, nine output, seven microphone metadata, 12 persistence/ownership) |
+| App integration | PASS: explicit starts, countdown/recording indication, Keep/Redo, six kept demo samples, optional skip, visible controls and close during capture |
+| Offline hardware capture | PASS: firmware RECORDING event, exactly 64,000 samples / 128,000 bytes, four ordered windows and local cue/idle completion; unspecified room input, not a kept user calibration sample |
+| Control ownership | PASS: heartbeats retain paused wake beyond ten seconds; mid-capture cancel clears ownership before another trial |
+| Close/disconnect | PASS: normal close releases COM26 and rearms wake; simulated abrupt disconnect expires the lease and returns to idle with wake armed and Wi-Fi off |
+| Privacy/configuration | PASS: CA/name/date verification, five transport units compiled with logging off, unsafe upgrade strings and actual device credential absent from application; NVS excluded from normal write map |
+| Earlier-profile regression | PASS: `voice` profile rebuilt with microphone feature disabled; not flashed over current microphone build |
+| Cloud | Worker deployment/key configuration unchanged; calibration opens no cloud session and uploads no microphone audio |
+| Human calibration | PENDING: user will run three quiet and three normal-speech samples in the standalone app; optional wake check separately reported |
+
+Application SHA256: `52629fe3f3c900a377e17843065ef819f3bc6865877e5f3308a4723619573ee2`. Private recovery image: `recovery/2026-11-18-phase-4d/before-microphone-full-flash.bin`, 8,388,608 bytes, SHA256 `0d48e0017f2ea47382e71c0c95465593a4bf132480bff4c9a1994b6faa21686f`. Tested write files, generated configuration and manifest are archived under that directory's `built-microphone/` folder.
+
+Final private evidence: `logs/esp32-microphone-preflash.json`, `esp32-microphone-calibrator-build.log`, `esp32-microphone-calibrator-flash.log`, `esp32-calibrator-hardware-qa.json`, `esp32-microphone-host-tests.json`, `calibrator-ui-test.log` and `esp32-microphone-voice-regression-build.log`. User evidence will appear under `logs/microphone-calibration/`; the review tool currently reports no completed user calibration. Next: review those saved measurements before a controlled microphone-to-Gemini question/answer.
