@@ -7,17 +7,18 @@ const config = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.met
 const source = await readFile(new URL(`../${config.main}`, import.meta.url), "utf8");
 // Public test fixture, not the credential from .dev.vars.
 const testToken = "0123456789abcdef".repeat(4);
-const rateConfig = config.ratelimits.find(binding => binding.name === "DEVICE_RATE_LIMITER");
-function makeWorker(env = {}, withRateLimit = true, namespace = rateConfig.namespace_id) {
+function makeWorker(env = {}, withRateLimit = true, suffix = "") {
+  const workerName = config.name + suffix;
   const rateEnv = withRateLimit ? {
-    DEVICE_RATE_LIMITER: { type: "rate-limit", namespace, simple: rateConfig.simple },
+    DEVICE_RATE_LIMITER: { type: "durable-object", worker: workerName, exportName: "DeviceRateLimiter" },
   } : {};
   return new Miniflare({
     workers: [{
       config: {
-        name: config.name,
+        name: workerName,
         compatibilityDate: config.compatibility_date,
         env: { ...rateEnv, ...env },
+        exports: { DeviceRateLimiter: { type: "durable-object", storage: "sqlite" } },
         manifest: {
           mainModule: "index.js",
           modules: { "index.js": { type: "esm", contents: source } },
@@ -39,10 +40,11 @@ const invalidLimiterWorker = makeWorker({
 });
 const limitedWorker = makeWorker(
   { DEVICE_AUTH_TOKEN: { type: "json", value: testToken } }, true,
-  String(Number(rateConfig.namespace_id) + 1),
+  "-burst",
 );
+const parallelWorker = makeWorker({ DEVICE_AUTH_TOKEN: { type: "json", value: testToken } }, true, "-parallel");
 after(() => Promise.all([
-  worker, unconfiguredWorker, malformedConfigWorker, noLimiterWorker, invalidLimiterWorker, limitedWorker,
+  worker, unconfiguredWorker, malformedConfigWorker, noLimiterWorker, invalidLimiterWorker, limitedWorker, parallelWorker,
 ].map(instance => instance.dispose())));
 
 test("GET /health returns service status as noncached JSON in workerd", async () => {
@@ -175,16 +177,14 @@ test("a missing or invalid limiter fails closed after authentication while healt
 });
 
 test("device quota ignores bad credentials, enforces 429, and leaves health available", async () => {
-  assert.equal(rateConfig.simple.limit, 10);
-  assert.equal(rateConfig.simple.period, 60);
-  for (let i = 0; i < rateConfig.simple.limit + 2; ++i) {
+  for (let i = 0; i < 12; ++i) {
     const response = await limitedWorker.dispatchFetch("http://localhost/device/check", {
       method: "POST", headers: { Authorization: `Bearer f${testToken.slice(1)}` },
     });
     assert.equal(response.status, 401);
     await response.arrayBuffer();
   }
-  for (let i = 0; i < rateConfig.simple.limit; ++i) {
+  for (let i = 0; i < 10; ++i) {
     const response = await limitedWorker.dispatchFetch(`http://localhost/device/check?attempt=${i}`, {
       method: "POST", headers: { Authorization: `Bearer ${testToken}` },
     });
@@ -196,7 +196,8 @@ test("device quota ignores bad credentials, enforces 429, and leaves health avai
       method: "POST", headers: { Authorization: `Bearer ${testToken}` },
     });
     assert.equal(response.status, 429);
-    assert.equal(response.headers.get("retry-after"), "60");
+    assert.ok(/^[1-9][0-9]?$/.test(response.headers.get("retry-after")));
+    assert.ok(Number(response.headers.get("retry-after")) <= 60);
     assert.equal(response.headers.get("cache-control"), "no-store");
     assert.deepEqual(await response.json(), { error: "rate_limited" });
   }
@@ -206,4 +207,14 @@ test("device quota ignores bad credentials, enforces 429, and leaves health avai
   const healthy = await limitedWorker.dispatchFetch("http://localhost/health");
   assert.equal(healthy.status, 200);
   await healthy.arrayBuffer();
+});
+
+test("parallel authenticated requests share one atomic admission budget", async () => {
+  const responses = await Promise.all(Array.from({ length: 20 }, (_, i) =>
+    parallelWorker.dispatchFetch(`http://localhost/device/check?parallel=${i}`, {
+      method: "POST", headers: { Authorization: `Bearer ${testToken}` },
+    })));
+  assert.equal(responses.filter(response => response.status === 200).length, 10);
+  assert.equal(responses.filter(response => response.status === 429).length, 10);
+  for (const response of responses) await response.arrayBuffer();
 });

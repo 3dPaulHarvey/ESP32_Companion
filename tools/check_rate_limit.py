@@ -7,6 +7,7 @@ refuses redirects, and never prints it. This route makes no Gemini requests.
 import argparse
 import json
 from pathlib import Path
+import re
 import time
 import urllib.error
 import urllib.request
@@ -42,7 +43,7 @@ def probe(opener, base, path, credential=None, method="POST"):
 
 
 def expect(result, status, body, label, results):
-    if result["revision"] != "rate-limit-v2":
+    if result["revision"] != "rate-limit-v3":
         raise RuntimeError("The expected rate-limit revision is not serving this request yet.")
     passed = result["status"] == status and result["body"] == body and result["no_store"] and result["is_json"]
     results.append({"case": label, "status": result["status"], "passed": passed})
@@ -58,9 +59,13 @@ def verify(base, token, recover, results):
         result = probe(opener, base, "/device/check", token)
         if result["status"] == 429:
             expect(result, 429, {"error": "rate_limited"}, "burst throttled", results)
-            if result["retry_after"] != "60":
-                raise RuntimeError("Throttled response must provide Retry-After: 60.")
-            print(f"PASS burst throttled after {admitted} admitted requests; Retry-After=60", flush=True)
+            try:
+                retry_after = int(result["retry_after"])
+            except (TypeError, ValueError):
+                raise RuntimeError("Throttled response must provide a numeric Retry-After.") from None
+            if not 1 <= retry_after <= 60:
+                raise RuntimeError("Retry-After must be between 1 and 60 seconds.")
+            print(f"PASS burst throttled after {admitted} admitted requests; Retry-After={retry_after}", flush=True)
             break
         expect(result, 200, {"authenticated": True}, "burst request admitted", results)
         admitted += 1
@@ -73,13 +78,17 @@ def verify(base, token, recover, results):
            {"status": "ok", "service": "esp32-companion", "api_version": 1}, "health while throttled", results)
     repeated = probe(opener, base, "/device/check?attempt=another", token)
     expect(repeated, 429, {"error": "rate_limited"}, "changing query does not reset quota", results)
-    if repeated["retry_after"] != "60":
-        raise RuntimeError("Repeated throttle response must provide Retry-After: 60.")
+    try:
+        retry_after = int(repeated["retry_after"])
+    except (TypeError, ValueError):
+        raise RuntimeError("Repeated throttle response must provide a numeric Retry-After.") from None
+    if not 1 <= retry_after <= 60:
+        raise RuntimeError("Repeated Retry-After must be between 1 and 60 seconds.")
     print("PASS authentication and health remain available during throttling", flush=True)
 
     if recover:
-        print("Waiting 61 seconds for the rate window before testing recovery...", flush=True)
-        deadline = time.monotonic() + 61
+        print(f"Waiting {retry_after + 1} seconds for the rate window before testing recovery...", flush=True)
+        deadline = time.monotonic() + retry_after + 1
         while time.monotonic() < deadline:
             time.sleep(max(0, min(20, deadline - time.monotonic())))
         expect(probe(opener, base, "/device/check", token), 200,
@@ -94,7 +103,10 @@ def main():
     parser.add_argument("--base-url", type=validate_base, default=HOSTED_BASE,
                         help="Target service origin; the device credential will be sent here.")
     parser.add_argument("--recover", action="store_true", help="Wait one retry window and verify a successful request.")
+    parser.add_argument("--name", default="worker-rate-limit-check", help="Log basename under logs/.")
     args = parser.parse_args()
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", args.name):
+        parser.error("--name must contain only letters, digits, underscores or hyphens")
     results = []
     failure = None
     try:
@@ -102,7 +114,7 @@ def main():
     except RuntimeError as error:
         failure = str(error)
     root = Path(__file__).resolve().parent.parent
-    output = root / "logs" / "worker-rate-limit-check.log"
+    output = root / "logs" / (args.name + ".log")
     output.parent.mkdir(exist_ok=True)
     record = {"base_url": args.base_url, "recovery_requested": args.recover, "passed": failure is None, "checks": results}
     if failure:

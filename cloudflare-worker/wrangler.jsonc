@@ -11,14 +11,18 @@
   "observability": {
     "enabled": true
   },
-  "ratelimits": [
-    {
-      "name": "DEVICE_RATE_LIMITER",
-      "namespace_id": "20261117",
-      "simple": {
-        "limit": 10,
-        "period": 60
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DEVICE_RATE_LIMITER",
+        "class_name": "DeviceRateLimiter"
       }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "device-rate-sqlite-v1",
+      "new_sqlite_classes": ["DeviceRateLimiter"]
     }
   ],
   "dev": {
