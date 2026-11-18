@@ -78,4 +78,4 @@ Evidence: `logs/worker-gemini-runtime-tests.log`, `worker-gemini-bundle.log`, `w
 
 ## Next baby step
 
-The first fixed text request / spoken response has now passed, including user-confirmed desktop playback. [Replay and results](DESKTOP_VOICE.md). Next test a short prerecorded 16 kHz input / 24 kHz output exchange. Finish the open microphone headroom check before moving live voice transport onto COM26. No ESP32 cloud firmware or personal voice upload is part of Phase 3d.
+The first fixed text request / spoken response and a prerecorded 16 kHz question / 24 kHz answer have now passed, including user-confirmed desktop playback. [Audio exchange results](DESKTOP_AUDIO.md). Next prove authenticated Worker/session access on COM26, then add embedded audio transport. Finish microphone headroom and capture-duration checks before live robot conversation. No ESP32 cloud firmware or personal voice upload is part of Phase 3d.

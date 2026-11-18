@@ -51,4 +51,4 @@ The existing `session-check` command still performs only the setup acknowledgmen
 
 Evidence: `logs/worker-gemini-voice-check.log`, `worker-gemini-voice-check.wav`, `worker-gemini-voice-wave-validation.log`, and `worker-gemini-voice-listener-check.log`. Node/PowerShell syntax and whitespace checks pass; Python's independent WAV reader verified the generated file's format, duration and sample statistics. No provider call is needed to repeat that file inspection.
 
-Next: send a short fixed prerecorded question at 16 kHz and verify the returned 24 kHz answer. Then integrate the ESP32 transport and finish microphone headroom calibration before live robot voice streaming.
+The next prerecorded 16 kHz question / 24 kHz answer checkpoint has now passed, including user-confirmed playback. [Audio exchange results](DESKTOP_AUDIO.md). Next prove authenticated Worker/session access on COM26, then integrate embedded audio transport and finish microphone checks.

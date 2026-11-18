@@ -15,7 +15,10 @@
     "whoami": "wrangler whoami",
     "deploy": "wrangler deploy",
     "session-check": "node ../tools/check_gemini_session.mjs --connect",
-    "voice-check": "node ../tools/check_gemini_session.mjs --speak"
+    "voice-check": "node ../tools/check_gemini_session.mjs --speak",
+    "audio-fixture": "python ../tools/make_audio_fixture.py",
+    "audio-check": "node ../tools/check_gemini_session.mjs --audio-question",
+    "test-desktop": "node --test ../tools/test_gemini_audio.mjs"
   },
   "devDependencies": {
     "miniflare": "5.20261117.0-beta",

@@ -2,6 +2,8 @@
 // credential and the short-lived Gemini token, and logs neither one.
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
+import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 
 const hostedBase = "https://esp32-companion-control.stiener.workers.dev";
 const model = "models/gemini-3.8-live";
@@ -10,6 +12,22 @@ const root = new URL("../", import.meta.url);
 const checks = [];
 class CheckFailure extends Error {}
 const voicePrompt = "In one short sentence, say hello and tell me you are ready to chat.";
+
+async function loadAudioQuestion() {
+  let pcm, metadata;
+  try {
+    pcm = await readFile(new URL("logs/gemini-input-question.pcm", root));
+    metadata = JSON.parse(await readFile(new URL("logs/gemini-input-question.json", root), "utf8"));
+  } catch { throw new CheckFailure("Prepare the fixed synthetic question with make_audio_fixture.py first."); }
+  if (!pcm.length || pcm.length % 2 || pcm.length > 16000 * 2 * 6 ||
+      metadata.source !== "Windows System.Speech synthetic fixture" || metadata.question !== "What is two plus two?" ||
+      metadata.sample_rate !== 16000 || metadata.channels !== 1 || metadata.sample_bits !== 16 ||
+      metadata.bytes !== pcm.length || metadata.microphone_opened !== false ||
+      metadata.sha256 !== createHash("sha256").update(pcm).digest("hex")) {
+    throw new CheckFailure("The fixed audio fixture failed format, size or identity validation.");
+  }
+  return { pcm, metadata };
+}
 
 function wavFile(pcm) {
   const header = Buffer.alloc(44);
@@ -92,17 +110,26 @@ function expectRejection(result, status, error) {
   }
 }
 
-async function connect(token, speak = false) {
+export async function connect(token, { speak = false, fixture = null } = {}, runtime = {}) {
   // Gemini's constrained WebSocket protocol requires the ephemeral credential
   // as access_token. Construct the URL only in memory; never print it/errors.
   const url = new URL(websocketUrl);
   url.searchParams.set("access_token", token);
+  const expectReply = speak || Boolean(fixture);
+  const Socket = runtime.WebSocket || WebSocket;
+  const pause = runtime.pause || (ms => new Promise(resolve => setTimeout(resolve, ms)));
   return await new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
+    const socket = new Socket(url);
     let settled = false;
     let setupReceived = false;
     let receivedBytes = 0;
     const audioChunks = [];
+    const transcriptParts = [];
+    let transcriptLength = 0;
+    let inputBytesSent = 0;
+    let inputChunksSent = 0;
+    let inputStreamEnded = !fixture;
+    let turnCompleteSeen = false;
     let messageQueue = Promise.resolve();
     function finish(error) {
       if (settled) return;
@@ -110,9 +137,26 @@ async function connect(token, speak = false) {
       clearTimeout(timer);
       try { socket.close(1000); } catch { /* Do not surface native errors. */ }
       if (error) reject(new CheckFailure(error));
-      else resolve(Buffer.concat(audioChunks));
+      else resolve({ pcm: Buffer.concat(audioChunks), transcript: transcriptParts.join(""), inputBytesSent, inputChunksSent, inputStreamEnded });
     }
-    const timer = setTimeout(() => finish(speak ? "Gemini voice turn did not complete within 30 seconds." : "Gemini setup did not complete within 15 seconds."), speak ? 30000 : 15000);
+    const timer = setTimeout(() => finish(expectReply ? "Gemini voice turn did not complete within 30 seconds." : "Gemini setup did not complete within 15 seconds."), expectReply ? 30000 : 15000);
+    async function sendAudioQuestion() {
+      // 40 ms frames, paced at 16 kHz. Send raw PCM, never its WAV header or
+      // a text copy of the question. Stop immediately on failure/closure.
+      for (let offset = 0; offset < fixture.pcm.length; offset += 1280) {
+        if (settled) return;
+        if (socket.readyState !== 1 || socket.bufferedAmount > 65536) throw new CheckFailure("Audio sender unavailable.");
+        const chunk = fixture.pcm.subarray(offset, offset + 1280);
+        socket.send(JSON.stringify({ realtimeInput: { audio: { data: chunk.toString("base64"), mimeType: "audio/pcm;rate=16000" } } }));
+        inputBytesSent += chunk.length;
+        inputChunksSent++;
+        await pause(chunk.length / 32);
+      }
+      if (settled) return;
+      socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+      inputStreamEnded = true;
+      if (turnCompleteSeen && receivedBytes) finish();
+    }
     socket.addEventListener("open", () => {
       // The token locks the full policy. No microphone audio is sent.
       try { socket.send(JSON.stringify({ setup: { model } })); }
@@ -122,22 +166,32 @@ async function connect(token, speak = false) {
       if (settled) return;
       try {
         const raw = typeof event.data === "string" ? event.data : await event.data.text();
-        if (raw.length > (speak ? 262144 : 16384)) return finish("Unexpected oversized Gemini reply.");
+        if (raw.length > (expectReply ? 262144 : 16384)) return finish("Unexpected oversized Gemini reply.");
         const message = JSON.parse(raw);
         if (Object.hasOwn(message, "error")) return finish("Google rejected the constrained Gemini request; check project access and quota.");
         if (Object.hasOwn(message, "toolCall")) return finish("Unexpected tool request in a tools-disabled test.");
         if (Object.hasOwn(message, "setupComplete")) {
-          if (!speak) return finish();
+          if (!expectReply) return finish();
           if (setupReceived) return finish("Unexpected repeated Gemini setup acknowledgment.");
           setupReceived = true;
-          socket.send(JSON.stringify({ clientContent: {
-            turns: [{ role: "user", parts: [{ text: voicePrompt }] }], turnComplete: true,
-          } }));
+          if (fixture) {
+            void sendAudioQuestion().catch(() => finish("Could not finish sending the fixed audio question."));
+          } else {
+            socket.send(JSON.stringify({ clientContent: {
+              turns: [{ role: "user", parts: [{ text: voicePrompt }] }], turnComplete: true,
+            } }));
+          }
         }
-        if (speak && message.serverContent) {
+        if (expectReply && message.serverContent) {
           if (!setupReceived) return finish("Gemini sent voice content before setup completed.");
           const content = message.serverContent;
           if (content.interrupted) return finish("Gemini voice turn was unexpectedly interrupted.");
+          if (fixture && content.outputTranscription?.text !== undefined) {
+            const text = content.outputTranscription.text;
+            if (typeof text !== "string" || transcriptLength + text.length > 2048) return finish("Unexpected oversized or invalid reply transcript.");
+            transcriptLength += text.length;
+            transcriptParts.push(text);
+          }
           for (const part of content.modelTurn?.parts || []) {
             if (!part.inlineData) continue;
             const { mimeType, data } = part.inlineData;
@@ -152,7 +206,8 @@ async function connect(token, speak = false) {
           }
           if (content.turnComplete) {
             if (!receivedBytes) return finish("Gemini completed the turn without audio.");
-            finish();
+            turnCompleteSeen = true;
+            if (inputStreamEnded) finish();
           }
         }
       } catch {
@@ -166,7 +221,7 @@ async function connect(token, speak = false) {
     });
     socket.addEventListener("error", () => finish("Gemini WebSocket connection failed; check project access and network."));
     socket.addEventListener("close", event => {
-      if (!settled) finish(`Gemini closed before setup completed (code ${Number(event.code)}).`);
+      if (!settled) finish(`Gemini closed before the check completed (code ${Number(event.code)}).`);
     });
   });
 }
@@ -179,11 +234,14 @@ async function main() {
       name: { type: "string" },
       connect: { type: "boolean", default: false },
       speak: { type: "boolean", default: false },
+      "audio-question": { type: "boolean", default: false },
     } }));
-  } catch { throw new CheckFailure("Use only --base-url ORIGIN, --name BASENAME, --connect and --speak."); }
-  values.name ??= values.speak ? "worker-gemini-voice-check" : "worker-gemini-session-check";
+  } catch { throw new CheckFailure("Use only --base-url ORIGIN, --name BASENAME, --connect, --speak or --audio-question."); }
+  if (values.speak && values["audio-question"]) throw new CheckFailure("Choose either the text greeting or the audio question.");
+  values.name ??= values["audio-question"] ? "worker-gemini-audio-check" : values.speak ? "worker-gemini-voice-check" : "worker-gemini-session-check";
   if (!/^[A-Za-z0-9_-]+$/.test(values.name)) throw new CheckFailure("Use a simple letters/digits/hyphens/underscores log name.");
   const base = baseOrigin(values["base-url"]);
+  const fixture = values["audio-question"] ? await loadAudioQuestion() : null;
   let privateText;
   try { privateText = await readFile(new URL("cloudflare-worker/.dev.vars", root), "utf8"); }
   catch { throw new CheckFailure("The local device credential file is unavailable."); }
@@ -223,17 +281,27 @@ async function main() {
     throw new CheckFailure("The temporary-token expiry window is invalid or elapsed.");
   }
   pass("temporary token issued with expected model and expiry", { status: 200, model });
-  let audio;
-  if (values.connect || values.speak) {
-    audio = await connect(payload.token, values.speak);
+  let answer;
+  if (values.connect || values.speak || fixture) {
+    answer = await connect(payload.token, { speak: values.speak, fixture });
     pass("Gemini accepted the constrained WebSocket setup", { microphone_audio_sent: false, prompt_sent: values.speak });
   }
   payload.token = undefined;
   const folder = new URL("logs/", root);
   await mkdir(folder, { recursive: true });
-  if (values.speak) {
-    await writeFile(new URL(`${values.name}.wav`, folder), wavFile(audio));
-    pass("one bounded Gemini spoken reply saved", { bytes: audio.length, sample_rate: 24000, channels: 1, sample_bits: 16, seconds: audio.length / 48000 });
+  if (values.speak || fixture) {
+    await writeFile(new URL(`${values.name}.wav`, folder), wavFile(answer.pcm));
+    pass("one bounded Gemini spoken reply saved", { bytes: answer.pcm.length, sample_rate: 24000, channels: 1, sample_bits: 16, seconds: answer.pcm.length / 48000 });
+  }
+  if (fixture) {
+    await writeFile(new URL(`${values.name}.transcript.txt`, folder), answer.transcript + "\n");
+    if (answer.inputBytesSent !== fixture.pcm.length || !answer.inputStreamEnded || !/\b(?:four|4)\b/i.test(answer.transcript)) {
+      throw new CheckFailure("Audio exchange finished, but the complete input/expected answer was not verified.");
+    }
+    pass("fixed audio question received the expected answer", {
+      input_bytes: answer.inputBytesSent, input_chunks: answer.inputChunksSent, input_sample_rate: 16000,
+      input_sha256: fixture.metadata.sha256, audio_stream_end_sent: true, microphone_audio_sent: false, text_question_sent: false,
+    });
   }
   await writeFile(new URL(`${values.name}.log`, folder), JSON.stringify({
     base_url: base, checked_at: new Date().toISOString(), checks,
@@ -241,7 +309,7 @@ async function main() {
   console.log("Session checks passed. No credential or temporary token was printed or logged.");
 }
 
-main().catch(error => {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(error => {
   // Only our controlled messages reach the terminal; never print native stacks.
   const safe = error instanceof CheckFailure ? error.message : "Unexpected checker failure.";
   console.error(`Session check failed: ${safe}`);

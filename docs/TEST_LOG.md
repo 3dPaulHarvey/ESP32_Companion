@@ -359,3 +359,28 @@ After saving Phase 3d at `8796881` / `phase-3d-hosted-gemini-session-verified`, 
 Evidence: `logs/worker-gemini-voice-check.log`, `worker-gemini-voice-check.wav`, `worker-gemini-voice-wave-validation.log`, `worker-gemini-voice-listener-check.log` and the latest `worker-gemini-session-check.log`. All 20 existing Worker runtime groups passed in Phase 3d; no Worker source/config changed in this output increment. No additional runtime dependencies or cloud deployment were required.
 
 **First desktop spoken-output checkpoint passed, including listener confirmation.** This is not yet an audio-input or robot conversation test. Next verify a fixed prerecorded 16 kHz question / 24 kHz response, then integrate ESP32 transport and microphone headroom. See [DESKTOP_VOICE.md](DESKTOP_VOICE.md).
+
+## 2026-11-17 - Phase 3f: prerecorded audio question and answer verified
+
+Generated the fixed synthetic question "What is two plus two?" locally through Windows System.Speech, without opening a microphone. The complete recording plus 80 ms of leading / 320 ms of trailing silence is 2.41 seconds of signed 16-bit little-endian mono PCM at 16 kHz. The generator saves a replay WAV, raw PCM and question/source/format/hash manifest under ignored logs. The desktop checker validates this identity before requesting a token. No text copy of the question is sent to Gemini.
+
+After the existing constrained setup acknowledgment, the new audio-question mode sends raw PCM in paced 40 ms frames, followed by `audioStreamEnd` for the default automatic activity detector. It receives bounded 24 kHz PCM until turn completion and collects only a bounded output transcript for the fixed question's answer check. The client stops on closure/backpressure and retains its six-second input, 20-second output and 30-second total-turn bounds. Setup-only and text-greeting modes remain available. Worker source/configuration, dependency versions and the hosted deployment are unchanged.
+
+| Check | Observed result |
+|---|---|
+| Offline desktop tests | PASS: six tests, public fixtures/fake socket, no network or real credential |
+| Sender contract | PASS: exact PCM bytes reconstructed from frames; 1,280-byte maximum; matching pacing; stream-end after input; no text fallback |
+| Failure handling | PASS: excessive buffering prevents sending, mid-input close stops later frames/EOF, empty audio response fails |
+| Prior modes | PASS offline: setup-only sends one setup; text greeting still sends one user turn and receives PCM |
+| Hosted session/auth | PASS: GET=405, missing/wrong=401, token=200, constrained setup accepted |
+| Real audio question | PASS: entire 77,120-byte input sent as 61 audio chunks and stream-end; no question text sent |
+| Correct answer | PASS: output transcript says "Two plus two equals four! Is there anything else I can help you with?" |
+| Input WAV / samples | PASS: 38,560 frames at 16 kHz, 2.410 s, peak 15,095, RMS 1,181.28, zero clipped samples |
+| Output WAV / samples | PASS: 102,720 frames at 24 kHz, 4.280 s, peak 22,845, RMS 3,316.68, zero clipped samples |
+| Windows playback | PASS: completed recorded-question and reply playback |
+| User verification | PASS: user confirms the correct answer and clear speech at normal speed |
+| Credentials / firmware | No permanent or temporary token in audio/transcript/metadata output; no microphone opened, robot flash or reference change |
+
+Evidence: `logs/gemini-input-question.json`, `worker-gemini-audio-check.log`, `worker-gemini-audio-check.transcript.txt`, `worker-gemini-audio-wave-validation.log`, `worker-gemini-audio-listener-check.log` and `worker-gemini-audio-desktop-tests.log`. Repeat commands are documented in [DESKTOP_AUDIO.md](DESKTOP_AUDIO.md). The earlier 20 Worker tests were not repeated because Worker code/configuration did not change; this increment's six desktop tests cover its new sender and existing client modes.
+
+**Desktop prerecorded audio exchange passed, including listener confirmation.** This does not verify the robot's microphone: the fixture is 2.41 seconds, longer than its current two-second local capture. Next prove authenticated Worker/session access from the development ESP32, then add embedded Gemini transport and check microphone headroom/capture duration before live conversation.
