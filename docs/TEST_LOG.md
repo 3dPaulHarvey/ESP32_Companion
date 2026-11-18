@@ -230,3 +230,11 @@ Added `POST /device/check` using the server secret and an Authorization Bearer h
 `tools/check_device_auth.py` reads the ignored credential, validates the target origin (HTTPS except loopback HTTP), rejects redirects and emits only controlled status metadata. It verifies exact JSON/header contracts without printing arbitrary response bodies. Logs: `logs/worker-auth-runtime-tests.log`, `worker-auth-bundle.log`, `worker-auth-local-http.log`, and the latest `worker-device-auth-check.log`.
 
 **Local authentication checkpoint passed; hosted pass not yet claimed.** No Gemini request, request limiter, device provisioning or firmware change is included. Manual deployment and verification instructions are in [DEVICE_AUTH.md](DEVICE_AUTH.md).
+
+## 2026-11-17 — First hosted authentication run: credential mismatch suspected
+
+After the user reported deploying the new handler, the desktop checker observed missing credential=401 (PASS), incorrect credential=401 (PASS), and current local credential=401 (FAIL; expected 200). The first two cases passed exact response/challenge checks. The local token file still has the expected 64-character format. Because this handler would return 503 for absent/malformed server configuration, the observed 401 suggests that the saved Production value differs from the current local value; the earlier rotation is one possible cause. This is an inference, not a readback of Cloudflare's secret.
+
+Follow-up public checks verified `GET /health`=200 with its exact payload/no-store header and `GET /device/check`=405 with `Allow: POST`. The hosted handler is active and health remains functional. No token value was printed or logged. Evidence: `logs/worker-auth-hosted-mismatch.log`. The older `worker-device-auth-check.log` still records the successful local run, because the checker only writes that file after a complete pass.
+
+**Hosted authentication remains unverified.** Next action: edit the existing Production `DEVICE_AUTH_TOKEN` Secret to match the current local private file, deploy that change, then rerun the three-case checker. No firmware or authentication-code change is indicated by this result, and no Gemini call was made.

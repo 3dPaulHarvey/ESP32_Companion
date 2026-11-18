@@ -80,7 +80,7 @@ Cloudflare currently lists Windows 11 as the supported Windows platform for Wran
 
 The permanent Gemini key belongs in the server secret workflow when we reach that step. It is not needed in chat, firmware or the health test.
 
-## Device credential: hosted save confirmed, authentication deployment pending
+## Device credential: code deployed, credential matching pending
 
 A random 256-bit device credential has been generated in the Git-ignored `cloudflare-worker/.dev.vars` file. Its name is `DEVICE_AUTH_TOKEN`. The first value was exposed by an IDE text selection and was replaced locally without printing its replacement. The user has now confirmed saving the replacement as a Production Secret. This is the robot's shared credential, separate from a Gemini API key or a Cloudflare account/deployment token.
 
@@ -91,6 +91,6 @@ In the Worker's Settings, under **Runtime variables and secrets**, use **Add var
 3. Open the local `.dev.vars` file and copy only the 64 characters inside the quotes into Value.
 4. Save/deploy the change. Report only that the secret was saved; keep its value out of chat and screenshots.
 
-The local authentication handler and checker now pass correct/missing/wrong credential tests. Its hosted deployment is the next manual step; see [DEVICE_AUTH.md](DEVICE_AUTH.md). Saving the secret alone does not enforce authentication in the older health-only handler. No ESP32 flash or Gemini session is involved in this increment.
+The local authentication handler and checker pass correct/missing/wrong credential tests. The user has deployed that handler, but hosted tests reject the current local credential along with missing/wrong credentials. Re-save the existing Production secret from the current local file, then retry; see [DEVICE_AUTH.md](DEVICE_AUTH.md). Public `/health` still passes. No ESP32 flash or Gemini session is involved in this increment.
 
 Official references checked for this checkpoint: [Wrangler installation and requirements](https://developers.cloudflare.com/workers/wrangler/install-and-update/), [local development](https://developers.cloudflare.com/workers/local-development/), [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/), and [Miniflare testing](https://developers.cloudflare.com/workers/testing/miniflare/). Actual tests use the API shipped in the pinned packages. See [TEST_LOG.md](TEST_LOG.md) for the recorded results.
