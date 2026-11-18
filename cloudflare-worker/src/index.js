@@ -35,7 +35,7 @@ async function enforceDeviceRateLimit(env, headers) {
     return Response.json({ error: "service_unavailable" }, { status: 503, headers });
   }
   try {
-    const result = await limiter.limit({ key: deviceRateKey });
+    const result = await limiter.limit({ key: deviceRateKey, delta: 1 });
     if (typeof result?.success !== "boolean") {
       return Response.json({ error: "service_unavailable" }, { status: 503, headers });
     }
@@ -55,7 +55,7 @@ async function enforceDeviceRateLimit(env, headers) {
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
-    const headers = { "Cache-Control": "no-store" };
+    const headers = { "Cache-Control": "no-store", "X-Companion-Revision": "rate-limit-v2" };
 
     if (pathname === "/device/check") {
       if (request.method !== "POST") {
