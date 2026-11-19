@@ -5,6 +5,9 @@
 #endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
 #include "gemini_voice.h"
+#if CONFIG_COMPANION_FOLLOWUP
+#include "gemini_conversation.h"
+#endif
 #if COMPANION_QUESTION_FIXTURE
 #include "question_fixture.h"
 #endif
@@ -42,11 +45,12 @@ constexpr char kTag[] = "CompanionSession";
 constexpr char kUrl[] = "https://esp32-companion-control.stiener.workers.dev/device/session";
 constexpr char kNamespace[] = "companion";
 constexpr char kCredentialKey[] = "device_auth";
-enum class Kind { Session, Wrong, Missing, Gemini, Voice, Question, Fixture };
+enum class Kind { Session, Wrong, Missing, Gemini, Voice, Question, Fixture, Conversation, ConversationFixture };
+bool IsConversation(Kind kind) { return kind == Kind::Conversation || kind == Kind::ConversationFixture; }
 const char* KindName(Kind kind) {
-    return kind == Kind::Session ? "session" : kind == Kind::Wrong ? "wrong" : kind == Kind::Missing ? "missing" : kind == Kind::Gemini ? "gemini" : kind == Kind::Question ? "question" : kind == Kind::Fixture ? "fixture" : "voice";
+    return IsConversation(kind) ? (kind == Kind::Conversation ? "conversation" : "conversation_fixture") : kind == Kind::Session ? "session" : kind == Kind::Wrong ? "wrong" : kind == Kind::Missing ? "missing" : kind == Kind::Gemini ? "gemini" : kind == Kind::Question ? "question" : kind == Kind::Fixture ? "fixture" : "voice";
 }
-bool IsQuestion(Kind kind) { return kind == Kind::Question || kind == Kind::Fixture; }
+bool IsQuestion(Kind kind) { return kind == Kind::Question || kind == Kind::Fixture || IsConversation(kind); }
 std::atomic<bool> busy{false};
 #if CONFIG_COMPANION_MICROPHONE_PREP
 std::atomic<bool> calibration_guard{false};
@@ -54,6 +58,12 @@ std::atomic<bool> calibration_guard{false};
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
 std::atomic<bool> question_capture_guard{false}, question_cancelled{false};
 std::uint32_t pending_capture_id = 0;
+#endif
+#if CONFIG_COMPANION_FOLLOWUP
+std::atomic<bool> conversation_active{false};
+std::atomic<unsigned> conversation_turn{0};
+std::atomic<std::uint32_t> followup_capture_id{0};
+std::atomic<std::int64_t> conversation_owner_until{0};
 #endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
 std::atomic<CompanionSessionProbe::VoiceStage> voice_stage{CompanionSessionProbe::VoiceStage::Idle};
@@ -149,6 +159,9 @@ struct Result {
     companion_voice::AudioState audio{};
     uint32_t played_samples = 0, playback_ms = 0;
     unsigned rms = 0;
+#endif
+#if CONFIG_COMPANION_FOLLOWUP
+    CompanionConversation::Result conversation{};
 #endif
 };
 
@@ -262,9 +275,9 @@ Result FetchSession(Kind kind, ResponseBody& body, std::string_view& temporary) 
 
 Result Perform(Kind kind, [[maybe_unused]] std::uint32_t capture_id) {
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
-    auto question = kind == Kind::Question ? Application::GetInstance().GetAudioService().TakeQuestionAudio(capture_id) : nullptr;
+    auto question = kind == Kind::Question || kind == Kind::Conversation ? Application::GetInstance().GetAudioService().TakeQuestionAudio(capture_id) : nullptr;
 #if COMPANION_QUESTION_FIXTURE
-    if (kind == Kind::Fixture) question = MakeQuestionFixture();
+    if (kind == Kind::Fixture || kind == Kind::ConversationFixture) question = MakeQuestionFixture();
 #endif
     if (IsQuestion(kind) && (!question || !question->data() || question_cancelled.load())) {
         Result missing; missing.reason = question_cancelled.load() ? "cancelled" : "capture_unavailable"; return missing;
@@ -275,6 +288,15 @@ Result Perform(Kind kind, [[maybe_unused]] std::uint32_t capture_id) {
     // HTTP client, its TLS context, device credential and Authorization buffer
     // are destroyed before a Gemini transport is allocated.
     auto result = FetchSession(kind, body, temporary);
+#if CONFIG_COMPANION_FOLLOWUP
+    if (result.ok && IsConversation(kind)) {
+        if (result.metadata.start_in_seconds < 20) { result.ok = false; result.reason = "session_window_too_short"; return result; }
+        result.conversation = CompanionConversation::Run(temporary, *question, kind == Kind::ConversationFixture);
+        result.ok = result.conversation.ok; result.reason = result.conversation.reason;
+        result.gemini = result.conversation.connection;
+        return result;
+    }
+#endif
 #if CONFIG_COMPANION_GEMINI_SETUP_PROBE
     if (result.ok && kind == Kind::Gemini) {
         if (result.metadata.start_in_seconds < 20) { result.ok = false; result.reason = "session_window_too_short"; return result; }
@@ -338,6 +360,12 @@ bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0) {
     if (IsQuestion(kind)) question_cancelled.store(false);
 #endif
     pending_kind = kind;
+#if CONFIG_COMPANION_FOLLOWUP
+    conversation_active.store(IsConversation(kind));
+    conversation_turn.store(IsConversation(kind) ? 1 : 0);
+    followup_capture_id.store(0);
+    conversation_owner_until.store(esp_timer_get_time() + companion_followup::kOwnerLeaseUs);
+#endif
     const auto created = xTaskCreate([](void*) {
         const auto kind = pending_kind;
         const auto started = esp_timer_get_time();
@@ -358,7 +386,7 @@ bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0) {
         }
 #endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
-        if (kind == Kind::Voice || IsQuestion(kind)) {
+        if ((kind == Kind::Voice || IsQuestion(kind)) && !IsConversation(kind)) {
             ESP_LOGI(IsQuestion(kind) ? "CompanionQuestion" : "CompanionVoice", "RESULT ok=%d http=%d reason=%s upgrade_http=%d setup_ack=%d prompt_sent=%d turn_complete=%d close_sent=%d close_ack=%d close_code=%u audio_bytes=%u chunks=%u sample_rate=24000 played_samples=%lu duration_ms=%u rms=%u peak=%u clipped=%u playback_ms=%lu elapsed_ms=%lu cleanup=1 no_audio_upload=%d",
                 result.ok, result.http_status, result.reason, result.gemini.upgrade_http, result.gemini.setup_ack,
                 result.gemini.prompt_sent, result.audio.turn_complete, result.gemini.close_sent, result.gemini.close_ack,
@@ -370,6 +398,18 @@ bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0) {
             if (IsQuestion(kind)) ESP_LOGI("CompanionQuestion", "INPUT bytes=%u chunks=%u stream_ended=%d sample_rate=16000 input_cleared=1",
                 result.gemini.input_bytes, result.gemini.input_chunks, result.gemini.input_ended);
 #endif
+        }
+#endif
+#if CONFIG_COMPANION_FOLLOWUP
+        if (IsConversation(kind)) {
+            const auto& c = result.conversation;
+            ESP_LOGI("CompanionConversation", "RESULT ok=%d http=%d reason=%s upgrade_http=%d setup_ack=%d close_sent=%d close_ack=%d close_code=%u turns=%u followup_captures=%u quiet_discards=%u elapsed_ms=%lu cleanup=1 same_connection=1 fixture=%d",
+                result.ok, result.http_status, result.reason, c.connection.upgrade_http, c.connection.setup_ack,
+                c.connection.close_sent, c.connection.close_ack, c.connection.close_code, c.completed_turns,
+                c.followup_captures, c.quiet_discards, static_cast<unsigned long>((esp_timer_get_time() - started) / 1000), kind == Kind::ConversationFixture);
+            conversation_active.store(false);
+            const auto abandoned = followup_capture_id.exchange(0);
+            if (abandoned) Application::GetInstance().GetAudioService().DiscardQuestionAudio(abandoned);
         }
 #endif
         ESP_LOGI(kTag, "RESULT kind=%s ok=%d http=%d reason=%s temporary_bytes=%u start_in_s=%d expires_in_s=%d elapsed_ms=%lu discarded=1",
@@ -384,6 +424,9 @@ bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0) {
     }, "session_probe", (kind == Kind::Voice || IsQuestion(kind) || kind == Kind::Gemini) ? 16384 : 12288, nullptr, 1, nullptr);
     if (created != pdPASS) {
         busy.store(false);
+#if CONFIG_COMPANION_FOLLOWUP
+        conversation_active.store(false);
+#endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
         if (kind == Kind::Voice || IsQuestion(kind)) voice_stage.store(CompanionSessionProbe::VoiceStage::Idle);
 #endif
@@ -405,6 +448,33 @@ bool RequestQuestion(std::uint32_t capture_id) {
 }
 void CancelQuestion() { question_cancelled.store(true); }
 bool QuestionCancelled() { return question_cancelled.load(); }
+#if CONFIG_COMPANION_FOLLOWUP
+bool RequestConversation(std::uint32_t capture_id) {
+    return WifiManager::GetInstance().IsConnected() && Request(Kind::Conversation, capture_id);
+}
+#if COMPANION_QUESTION_FIXTURE
+bool RequestConversationFixture() { return WifiManager::GetInstance().IsConnected() && Request(Kind::ConversationFixture); }
+#endif
+bool ConversationActive() { return conversation_active.load(); }
+unsigned ConversationTurn() { return conversation_turn.load(); }
+void SetConversationStage(VoiceStage stage, unsigned turn) { conversation_turn.store(turn); voice_stage.store(stage); }
+void RequestFollowupCapture() { followup_capture_id.store(0); voice_stage.store(VoiceStage::FollowupRequested); }
+bool BeginFollowupCapture() {
+    auto expected = VoiceStage::FollowupRequested;
+    return conversation_active.load() && !question_cancelled.load() && voice_stage.compare_exchange_strong(expected, VoiceStage::FollowupListening);
+}
+bool SubmitFollowupCapture(std::uint32_t capture_id) {
+    if (!conversation_active.load() || question_cancelled.load() || voice_stage.load() != VoiceStage::FollowupListening || !capture_id) return false;
+    std::uint32_t empty = 0;
+    return followup_capture_id.compare_exchange_strong(empty, capture_id);
+}
+std::uint32_t TakeFollowupCaptureId() { return followup_capture_id.exchange(0); }
+void HeartbeatConversation(std::int64_t now_us) {
+    const auto until = conversation_owner_until.load();
+    if (conversation_active.load() && !question_cancelled.load() && now_us < until)
+        conversation_owner_until.store(now_us + companion_followup::kOwnerLeaseUs);
+}
+#endif
 #endif
 #if CONFIG_COMPANION_MICROPHONE_PREP
 bool IsBusy() { return busy.load(); }
@@ -462,9 +532,16 @@ void PrintStatus() {
     ESP_LOGI("CompanionQuestion", "FIXTURE_FEATURE enabled=1 microphone=0");
 #endif
 #endif
+#if CONFIG_COMPANION_FOLLOWUP
+    ESP_LOGI("CompanionConversation", "FEATURE version=1 arm=c max_turns=2 followup_ms=4000 owner_lease_ms=10000 boot_armed=0");
+#endif
 }
 void Poll(std::int64_t now_us) {
     if (provision_frame.Expire(now_us)) ESP_LOGW(kTag, "PROVISION ok=0 reason=frame_timeout");
+#if CONFIG_COMPANION_FOLLOWUP
+    if (conversation_active.load() && now_us >= conversation_owner_until.load() && !question_cancelled.exchange(true))
+        ESP_LOGW("CompanionConversation", "OWNER_EXPIRED cancelled=1");
+#endif
 }
 bool HandleSerialByte(char byte, std::int64_t now_us) {
     const auto event = provision_frame.Feed(byte, now_us);

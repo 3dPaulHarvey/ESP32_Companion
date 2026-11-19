@@ -69,6 +69,15 @@ config COMPANION_CLOUD_WAKE
         arm command. Boot and ordinary wake remain local. Arming expires on
         disconnect or timeout, and is consumed by one recognized wake.
 
+config COMPANION_FOLLOWUP
+    bool "Companion bounded two-turn conversation"
+    depends on COMPANION_CLOUD_WAKE
+    default n
+    help
+        Add an explicit conversation arm. Keep one Gemini connection across
+        two replies, checking a local four-second follow-up capture after
+        each reply. Quiet input is discarded locally. Boot stays unarmed.
+
 config OTA_URL
     string "Default OTA URL"
     default "https://api.tenclass.net/xiaozhi/ota/"

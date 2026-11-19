@@ -38,7 +38,7 @@ $taskBuildRoot = Join-Path $env:LOCALAPPDATA 'ESP32_Companion'
 python -m unittest discover -s tools -p 'test_*.py'
 ```
 
-`-BuildRoot` puts generated artifacts in `<root>/build-wake/`, outside the synced workspace; source and `sdkconfig.wake.generated` stay in the project. Use the same root for build and flash. Without that option, the usual project-local `build-wake/` is used. The wrapper verifies the development MAC before flashing, preserves NVS, and disables the synthetic fixture. `-FixtureCheck` remains restricted to the separate question diagnostic profile.
+`-BuildRoot` puts generated artifacts in `<root>/build-wake/`, outside the synced workspace; source and `sdkconfig.wake.generated` stay in the project. Use the same root for build and flash. Without that option, the usual project-local `build-wake/` is used. The wrapper verifies the development MAC before flashing, preserves NVS, and disables the synthetic fixture. `-FixtureCheck` is available only in the separate question and followup diagnostic profiles.
 
 The prior verified manual image and original full-flash backups are retained. A new private pre-wake full-flash backup is `recovery/2026-11-18-phase-5a/before-wake-full-flash.bin`, 8,388,608 bytes, SHA256 `751c0b8e0de35279416d8c2043e3e397ef7f6446da5c781e99707725ef5a0373`. Use it only for the same development board. [Build and recovery procedure](BUILD_AND_FLASH.md).
 

@@ -11,6 +11,7 @@ public:
     Reply& operator=(const Reply&) = delete;
     bool ready() const { return pcm_ && json_; }
     bool Consume(std::string_view message, bool input_mode = false);
+    void Clear();
     const int16_t* samples() const { return reinterpret_cast<const int16_t*>(pcm_); }
     unsigned rms() const;
     companion_voice::AudioState state{};

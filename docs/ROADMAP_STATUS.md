@@ -1,6 +1,6 @@
 # Companion roadmap progress
 
-Updated 2026-11-18. Current passed checkpoint: **Phase 5a: three consecutive armed physical wake/question/answer/READY cycles**, with correct clear answers confirmed by the user. Saved technical results verify each complete turn and zero input/output clipping. The original working robot and reference repository remain separate.
+Updated 2026-11-18. Current passed checkpoint: **Phase 5b: a quiet-control trial and two complete armed follow-up conversations**, including quiet closure and a fresh physical wake. The user confirms five correct clear answers; all eight captures and five playbacks have zero clipping. The original working robot and reference repository remain separate.
 
 | Roadmap phase | Status and evidence |
 |---|---|
@@ -14,8 +14,9 @@ Updated 2026-11-18. Current passed checkpoint: **Phase 5a: three consecutive arm
 | 4d: microphone preparation | Three quiet + three speech samples accepted; zero speech clipping at shift 14, 12.72 dB level contrast, four-second phrase fit confirmed. Capture shift 15 applied for additional headroom; wake remains 12. [Calibration](MICROPHONE_CALIBRATOR.md) |
 | 4e: manual microphone turn | Passed: real four-second capture → Gemini → correct spoken answer → READY. Exactly 128,000 input bytes sent and 91,200 reply samples played; input/output clipping zero. User confirms the answer. [Question results](ESP32_QUESTIONS.md) |
 | 5a: one armed wake/question/reply | Passed: three consecutive new physical wakes, exact input upload, complete reply/playback, normal close, READY and correct clear answers confirmed by the user. Self-paced tester autosaves results. [Wake results](ESP32_WAKE.md) |
-| 5b: follow-up conversation | Pending: follow-up listening, quiet timeout, re-wake, interruption and repeated recovery checks. |
+| 5b: bounded follow-up | Passed: quiet control plus two full physical follow-up conversations; same connection/context, five correct clear answers, quiet closure, READY and fresh wake. Eight captures/five playbacks have zero clipping. [Results](ESP32_FOLLOWUP.md) |
+| 5c: standalone operation and robustness | Pending: autonomous wake operation, longer turn-taking, interruption, ten conversation/idle cycles, prolonged idle and broader network-fault recovery. |
 
-The next small gate is **a follow-up question after the robot's answer**, followed by a quiet timeout to idle and a fresh wake. The current firmware still requires a separate arm for each cloud turn. Capture remains shift 15/four seconds; boot is offline/unarmed and ordinary wake remains local outside an armed trial. Both Desktop question testers remain repeatable references with saved evidence.
+The next small gate is **standalone wake operation without the PC tester**, followed by ten conversation/idle cycles, prolonged idle and broader outage/recovery checks. The current `followup` checkpoint permits two answers per Desktop arm and preserves context on one connection. Capture stays shift 15/four seconds; boot is offline/unarmed and ordinary wake remains local outside an armed trial. All three Desktop testers remain repeatable references with saved evidence.
 
-The first finished companion milestone still requires **wake -> spoken question -> spoken answer -> follow-up -> answer -> idle -> wake again**. The complete manual microphone turn is now established. Extended uptime, live audio streaming, interruption handling and broader network-fault tests remain open.
+The requested **wake -> spoken question -> spoken answer -> follow-up -> answer -> idle -> wake again** sequence is now verified under the explicit Desktop arm. Standalone startup/wake, extended uptime, longer/live turn-taking, interruption and broader network-fault tests remain open before the autonomous companion milestone is complete.

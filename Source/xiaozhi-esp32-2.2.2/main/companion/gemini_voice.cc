@@ -19,6 +19,14 @@ bool Reply::Consume(std::string_view message, bool input_mode) {
     if (!json_->Parse(message)) { reason = "invalid_or_complex_json"; return false; }
     return companion_voice::Consume(*json_, pcm_, companion_voice::kAudioLimit, state, reason, input_mode);
 }
+void Reply::Clear() {
+    if (pcm_) mbedtls_platform_zeroize(pcm_, companion_voice::kAudioLimit);
+    if (json_) {
+        json_->~JsonDocument(); mbedtls_platform_zeroize(json_, sizeof(*json_));
+        new (json_) companion_voice::JsonDocument;
+    }
+    state = {}; reason = "unavailable";
+}
 unsigned Reply::rms() const {
     return state.bytes ? static_cast<unsigned>(std::sqrt(static_cast<double>(state.squares) / (state.bytes / 2))) : 0;
 }
