@@ -1,5 +1,6 @@
 """Autonomous ownership, read-only observation, diagnostic leases and USB checklist."""
 import json
+import copy
 from pathlib import Path
 import tempfile
 import threading
@@ -160,6 +161,41 @@ class StandaloneChecks(unittest.TestCase):
                 app.worker.closing.set(); app.worker.cancel.set(); app.worker.join(timeout=3)
                 try: window.destroy()
                 except tk.TclError: pass
+
+    def test_tk_idle_usb_loss_preserves_completed_or_review_pending_trial(self):
+        for state in ["verified_by_user", "user_reported_problem", "awaiting_confirmation"]:
+            with self.subTest(state=state), tempfile.TemporaryDirectory(prefix="esp32-observer-usb-loss-") as temp:
+                window = tk.Tk(); app = ConversationApp(window, standalone=True, demo=True, results=Path(temp))
+                try:
+                    app.current = {"exercise": "followup", "state": state, "ended_at": "2026-11-19T01:52:40Z",
+                        "human_confirmed": True if state == "verified_by_user" else False if state == "user_reported_problem" else None,
+                        "measurement": {"completed_turns": 2, "normal_close": True}}
+                    app.data["attempts"].append(app.current); previous = copy.deepcopy(app.current)
+                    app.events.put(("error", {"message": "Cannot access COM26."}, time.monotonic()))
+                    app.process_events()
+                    saved = json.loads((app.folder / "session.json").read_text(encoding="utf-8"))
+                    self.assertEqual(saved["attempts"], [previous])
+                    self.assertEqual(saved["connection_events"][0]["after_attempt"], 1)
+                    self.assertEqual(saved["connection_events"][0]["message"], "Cannot access COM26.")
+                    self.assertFalse(app.connected)
+                finally:
+                    app.worker.closing.set(); app.worker.cancel.set(); app.worker.join(timeout=3); window.destroy()
+
+    def test_tk_error_during_active_trial_is_still_saved_as_failure(self):
+        with tempfile.TemporaryDirectory(prefix="esp32-observer-active-error-") as temp:
+            window = tk.Tk(); app = ConversationApp(window, standalone=True, demo=True, results=Path(temp))
+            try:
+                app.current = {"exercise": "followup", "state": "recording", "human_confirmed": None, "captures": []}
+                app.data["attempts"].append(app.current)
+                app.events.put(("error", {"message": "Conversation audio_send_failed."}, time.monotonic()))
+                app.process_events()
+                saved = json.loads((app.folder / "session.json").read_text(encoding="utf-8"))
+                self.assertEqual(saved["attempts"][0]["state"], "error")
+                self.assertEqual(saved["attempts"][0]["error"], "Conversation audio_send_failed.")
+                self.assertIsNone(saved["attempts"][0]["human_confirmed"])
+                self.assertNotIn("connection_events", saved)
+            finally:
+                app.worker.closing.set(); app.worker.cancel.set(); app.worker.join(timeout=3); window.destroy()
 
 
 if __name__ == "__main__": unittest.main()

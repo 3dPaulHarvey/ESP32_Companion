@@ -265,8 +265,15 @@ class ConversationApp:
                     self.status.set("Observation stopped" if self.standalone else "Cancelled - ready to retry")
                 elif name == "error":
                     self.recording_started = None; self.busy = self.connected = False; self.phase = "disconnected"
-                    if self.current: self.current.update(state="error", ended_at=utc_now(), error=data["message"])
-                    self.data["last_error"] = data["message"]; self.save(); self.status.set("Reconnect and retry"); self.hint.set(data["message"])
+                    active_trial = self.current and self.current["state"] in {"waiting_wake", "recording"}
+                    if active_trial:
+                        self.current.update(state="error", ended_at=utc_now(), error=data["message"])
+                    else:
+                        self.data.setdefault("connection_events", []).append({"recorded_at": utc_now(),
+                            "message": data["message"], "after_attempt": len(self.data["attempts"])})
+                    self.data["last_error"] = data["message"]; self.save()
+                    self.status.set("Reconnect and retry" if active_trial else "Connection lost; results saved")
+                    self.hint.set(data["message"] if active_trial else "Completed trials are preserved. Reconnect to record another, or use Unplugged power check when unlocked.")
                 self.refresh()
         except queue.Empty: pass
         if self.recording_started is not None and not self.closing:

@@ -1,6 +1,6 @@
 # Standalone wake operation
 
-**Phase 5c first gate: installed for self-paced physical verification.** The `standalone` profile connects saved Wi-Fi at boot. When READY, **Hi, E-S-P** starts the existing bounded two-answer conversation without a Desktop arm, open serial port or PC heartbeat. The preceding [armed follow-up checkpoint](ESP32_FOLLOWUP.md) remains verified separately. Ten-cycle stress, prolonged idle, access-point outage, longer conversations and interruption remain later gates.
+**Phase 5c first gate passed on 2026-11-18:** autonomous voice conversations and separate-USB-supply cold boot/re-wake are verified. The `standalone` profile connects saved Wi-Fi at boot. When READY, **Hi, E-S-P** starts the existing bounded two-answer conversation without a Desktop arm, open serial port or PC heartbeat. The saved run also contains one upload failure followed by fresh-wake recovery; this passes the functional gate while reliability work remains open. The preceding [armed follow-up checkpoint](ESP32_FOLLOWUP.md) remains verified separately. Ten-cycle stress, prolonged idle, access-point outage, longer conversations and interruption remain later gates.
 
 ## Expected robot behavior
 
@@ -28,7 +28,7 @@ Run one quiet trial followed by two full trials:
 
 After all three confirmed passes, **Unplugged power check** unlocks. Click it: the observer closes COM26 and presents an autosaved checklist. Unplug the PC USB cable and cold-boot the robot from a separate USB power supply. Use the robot's screen for timing. Ask the same two questions, stay quiet until READY, then try a fresh wake/question once more. Check only the items you actually observed, click **Save passed power check** (or save a problem), then **Finish & close**. This final check is a human report because the PC is disconnected.
 
-Each available capture, reply, speech decision, error, partial trial and human confirmation autosaves under `logs/robot-standalone-tests/<session id>/session.json`. The unplugged checklist saves with each click. No microphone recording, transcript, temporary URL or credential is saved. Demo data stays in `robot-standalone-tests-qa/` and does not count as a physical pass. If a save fails, use Retry save before closing.
+Each available capture, reply, speech decision, error, partial trial and human confirmation autosaves under `logs/robot-standalone-tests/<session id>/session.json`. The unplugged checklist saves with each click. A later idle USB error is saved as a separate connection event and preserves completed/confirmed trials; an error during an active trial still marks that trial failed. No microphone recording, transcript, temporary URL or credential is saved. Demo data stays in `robot-standalone-tests-qa/` and does not count as a physical pass. If a save fails, use Retry save before closing.
 
 ## Diagnostic compatibility and ownership
 
@@ -53,14 +53,34 @@ Source, configuration defaults, tools and recovery files remain inside the proje
 
 Developer-only synthetic verification adds `-FixtureCheck` to build/flash, then runs `check_standalone_build.py --fixture` and `check_standalone_device.py --fixture`. Prepare public PCM with `prepare_followup_fixture.py` first if needed. That image **disables automatic cloud wake** and accepts explicit f for two synthetic inputs followed by zero-filled quiet. It opens no microphone for those inputs. The check closes serial for 45 seconds after the first input, then reads the numeric last-job result and idle status. Restore the normal image afterward. The user observer excludes fixtures.
 
-## Evidence and remaining gate
+## Evidence and remaining reliability gates
 
 - 139 compiled policy assertions, including twelve standalone pause/offline/cooldown/admission checks.
 - All 80 host/app regression tests passed, including read-only commands, physical-wake ownership, quiet gating, lease-loss cleanup, a partial-old-status USB reopen regression and the actual Tk three-trial/disconnect/autosave workflow.
 - The synthetic ESP32 exchange passed with serial closed for 45 seconds: 256,000 input bytes, two complete answers, 97,440 played samples, one quiet discard and acknowledged close 1000. No PC heartbeat or live microphone upload; READY/wake rearmed on reconnection.
 - All eight normal-image startup, diagnostic handoff, network and observer checks pass in `logs/esp32-standalone-hardware-qa.json`. They upload no microphone audio and issue no provider request. An old partial USB status response initially made the observer reject the correct profile; anchoring identity to a complete capture-policy header fixes it, with a host regression and successful hardware rerun.
-- Real quiet/follow-up/re-wake trials and separate USB-supply cold boot remain **pending user verification**. Software tests and the disconnected serial test do not establish the unplugged power pass.
+- The saved real quiet trial and two subsequent full trials pass exact counts, autonomous model-wake ownership, same-connection context, quiet closure and READY, with correct clear answers confirmed by the user. The separate USB-supply checklist confirms cold boot without PC USB, two answers, quiet READY and another fresh wake. That unplugged portion is human evidence; numerical USB data covers the preceding observed trials.
 
 Installed normal app: **2,596,032 bytes**, SHA256 `90c0277461594eef9d143c044725a5cb0b8a0ad9e7b4958d5a4f700f389a81bd`. Normal preflash checks exclude both synthetic PCM fixtures, preserve strict TLS CA/name/date verification, compile private logging out of all five transport units, exclude the actual device credential from the image, and preserve NVS. Exact normal write files/configuration/manifest are archived under `recovery/2026-11-18-phase-5c/built-standalone/`.
 
 The private pre-standalone full flash is `recovery/2026-11-18-phase-5c/before-standalone-full-flash.bin`, 8,388,608 bytes, SHA256 `7f78a1f2632da24f51c66aac466cb3c47fc65fb6604d0e81d1cc971c29507e42`; its application matches the verified Phase 5b image byte-for-byte. Earlier backups remain intact. The passing diagnostic app is archived separately (`built-standalone-fixture/`, SHA256 `079ec1a96a00a615ff87ca2a2ef7cb77ce298e44e03bda52d7e3077dd9166f8b`). Recovery files remain private because full flash includes saved credentials. [Recovery procedure](BUILD_AND_FLASH.md).
+
+## Reviewed real session
+
+Closed, non-demo session **2026-11-18_17-46-59_cc36a560** contains six attempts, including additional repeats and an upload failure. The original JSON is unchanged, SHA256 `fab8d45e76d2c0e5e94bc67f510100264093855576f78b498943ddb847f77340`; the derived review is `logs/esp32-standalone-live-verified.json`.
+
+| Gate trial / saved attempt | Wake / baseline | Capture IDs | Answers / playback duration | Follow-up VAD speech / longest | Final quiet VAD | Network job |
+|---|---|---|---|---|---|---|
+| Quiet / 1 | 1 / 0 | 2, 3 | 1 / 4.240 s | No second upload | 4 / 4, rejected | 23.993 s |
+| Full / 4 | 4 / 3 | 8, 9, 10 | 2 / 2.170 s and 2.280 s | 65 / 16, accepted | 0 / 0, rejected | 36.105 s |
+| Full / 5 | 5 / 4 | 11, 12, 13 | 2 / 4.240 s and 2.600 s | 77 / 57, accepted | 4 / 4, rejected | 40.186 s |
+
+These three confirmed trials include **eight exact captures**, **five accepted uploads / 640,000 bytes**, **372,723 played samples**, and **three quiet segments / 384,000 bytes discarded locally**. Both full trials occur after the failed attempt and demonstrate recovery and a fresh wake after closure. The observer sends zero arms, heartbeats or network commands. There is no gain/VAD change.
+
+All five protocol-complete, human-confirmed attempts (1, 2, 4, 5 and 6) total nine spoken answers / 740,886 played samples, 1,152,000 accepted input bytes and five locally discarded quiet segments. All fifteen measured captures, including the failed attempt's input, have zero clipping and no raw near-full-scale words. All nine completed outputs have zero clipping.
+
+**Open reliability incident:** attempt 3 fails during input upload with HTTP 200, WebSocket upgrade 101 and `audio_send_failed`, before any completed reply. The number of uploaded bytes at failure and the lower-level transport cause were not saved, so the cause is undetermined. Later fresh wakes succeed. This is not a clean uninterrupted reliability run; the next gate is ten conversation/idle cycles with explicit failure and recovery accounting, followed by longer idle and outage checks.
+
+Attempt 6 completed its protocol result and received human confirmation before a later COM26 access error. The original app overwrote its state with `error`; the underlying completion, metrics and earlier human confirmation remain. This trial is recorded separately from the clean gate trials. The Desktop app now preserves completed/review-pending/confirmed trials and saves subsequent idle connection errors separately. Regression tests also verify that active-trial failures still fail. The source session was not rewritten, and the installed firmware is unchanged.
+
+The unplugged checklist has all three checks true, `observer_disconnected=true`, `human_only=true` and `human_confirmed=true`; the user also reports the power check passed. The app closed at **17:56:33 PST on November 18** / 01:56:33 UTC on November 19. The standalone functional gate is verified; broader reliability remains open.

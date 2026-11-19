@@ -722,3 +722,28 @@ Normal app **2,596,032 bytes**, SHA256 `90c0277461594eef9d143c044725a5cb0b8a0ad9
 The pre-standalone private full-flash backup is **8,388,608 bytes**, SHA256 `7f78a1f2632da24f51c66aac466cb3c47fc65fb6604d0e81d1cc971c29507e42`; its OTA0 image matches verified Phase 5b byte-for-byte. Existing backups remain untouched. Source/configuration/docs/tools/recovery remain in the project; only disposable generated output builds under `%LOCALAPPDATA%\ESP32_Companion\build-standalone`. The earlier sharing locks have no unresolved source relocation or runtime dependency. The locked-file cause was not proven to be Dropbox.
 
 Ignored evidence: `logs/esp32-standalone-preflash.json`, `logs/esp32-standalone-fixture-preflash.json`, `logs/esp32-standalone-fixture-hardware-qa.json`, `logs/esp32-standalone-hardware-qa.json`, `logs/robot-standalone-host-tests.log`, build/flash logs and future user sessions under `logs/robot-standalone-tests/`. No real microphone recording, transcript or credential was saved. No unattended microphone audio was uploaded. This is the first standalone gate; ten repeated conversation/idle cycles, prolonged idle, access-point outage, longer turn-taking and interruption remain open. [Self-paced procedure](ESP32_STANDALONE.md).
+
+## 2026-11-18 - Standalone voice and separate-USB-power functional gate verified
+
+The user reports all required trials and the unplugged power check passed. Reviewed closed, non-demo session **2026-11-18_17-46-59_cc36a560**, SHA256 `fab8d45e76d2c0e5e94bc67f510100264093855576f78b498943ddb847f77340`. Its original JSON is unchanged; numeric validation/derived summary is `logs/esp32-standalone-live-verified.json`. The session has six attempts, including additional repeats and one actual upload failure, so it does not establish an uninterrupted reliability pass.
+
+| Saved attempt | Exercise / result | Physical wake | Capture requests | Complete answers / played samples |
+|---|---|---|---|---|
+| 1 | Quiet, verified by user | 1 | 2, 3 | 1 / 101,761 |
+| 2 | Full, verified by user | 2 | 4, 5, 6 | 2 / 203,522 |
+| 3 | Input upload failed, no complete reply | 3 | 7 | 0 / 0 |
+| 4 | Full, verified by user; fresh-wake recovery | 4 | 8, 9, 10 | 2 / 106,800 |
+| 5 | Full, verified by user; another fresh wake | 5 | 11, 12, 13 | 2 / 164,162 |
+| 6 | Protocol complete and confirmed before later observer USB error | 6 | 14, 15, 16 | 2 / 164,641 |
+
+Attempts **1, 4 and 5** provide the quiet + two full functional gate: eight exact four-second/64,000-sample captures at shift 15, five complete accepted inputs totaling **640,000 bytes**, **372,723 played samples**, and three quiet segments totaling **384,000 bytes discarded locally**. Full-trial follow-up VAD accepts 65/16 and 77/57 speech/run frames; quiet decisions 4/4, 0/0 and 4/4 reject. Each successful result establishes autonomous physical model wake, no PC owner heartbeat, one connection, complete playback, normal close, quiet timeout and READY. Observer counters show zero arms, heartbeats or network commands. Correct clear speech is separately confirmed by the user.
+
+All five protocol-complete, human-confirmed attempts total **nine answers / 740,886 played samples**, **1,152,000 complete accepted input bytes** and **five locally discarded quiet segments / 640,000 bytes**. All fifteen measured captures and all nine completed outputs have zero clipping; no raw near-full-scale input words. Failed-attempt partial-upload bytes are unknown and excluded from those accepted-input totals. The measured elapsed times and duplicate capture/reply/VAD callback fields agree with the final results. No gain/VAD adjustment is warranted by these successful speech/quiet checks.
+
+The unplugged checklist is `verified_by_user`, `observer_disconnected=true`, `human_only=true`, all three checks true and `human_confirmed=true`. It confirms cold boot from a separate USB supply without PC USB, four then twelve on one wake, quiet READY, and another fresh wake/question. This is human evidence because serial was disconnected. Closed at **17:56:33 PST on November 18** / 01:56:33 UTC on November 19.
+
+**Open reliability issue:** attempt 3 reports HTTP 200 / upgrade 101 / `audio_send_failed`. Failure occurs in the upload path before any completed answer; byte progress and the lower-level cause were not saved, so the cause remains undetermined. Later fresh wakes pass, including consecutive full attempts 4 and 5. No automatic retry or firmware change was introduced to hide the failure. The next gate is ten conversation/idle cycles with explicit failure/recovery accounting, then prolonged idle and network-outage checks.
+
+**Resolved Desktop reporting bug:** attempt 6 had a complete successful result and human confirmation at 01:52:41 UTC, before a COM26 access error at 01:52:58. The old app overwrote the confirmed trial's state with `error`. Its metrics and earlier confirmation remain in the unmodified source; the review lists it separately from the clean gate trials. The shared conversation app now records idle connection errors separately and preserves completed, review-pending and confirmed trials. Active-trial errors still fail the trial. All **36 robot/app regression tests** pass after the fix, including two new Tk regression cases (three completed/review states plus an active failure); the earlier full 80-test installation suite remains recorded above.
+
+**Standalone functional gate passed with fresh-wake recovery; robustness remains open.** Installed firmware stays at SHA256 `90c0277461594eef9d143c044725a5cb0b8a0ad9e7b4958d5a4f700f389a81bd`; no flash, Worker, model, TLS, gain or wiring changes were needed for this review. [Detailed results](ESP32_STANDALONE.md).

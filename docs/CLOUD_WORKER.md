@@ -4,7 +4,7 @@ Phase 3a is verified locally and on the hosted HTTPS address on 2026-11-17. The 
 
 The current health response means the Worker program is running. It does not test device authentication, Gemini availability, quotas or a voice conversation. Those have separate checks: hosted device authentication, shared request limits, temporary-token issuance and a desktop Gemini setup acknowledgment now pass. See [GEMINI_SESSIONS.md](GEMINI_SESSIONS.md) for the current stage.
 
-The ESP32 has since passed real microphone turns and bounded follow-up conversations. The current [standalone increment](ESP32_STANDALONE.md) is installed for user verification: the robot connects saved Wi-Fi at boot and opens a session only for a new physical question wake. It retains the deployed Worker, permanent-key Secret, temporary-token contract and shared request limits; no Worker deployment or Google configuration change is needed for this increment.
+The ESP32 has since passed real microphone turns and bounded follow-up conversations. The current [standalone increment](ESP32_STANDALONE.md) passes its functional voice and separate-USB-power gate: the robot connects saved Wi-Fi at boot and opens a session for a new physical question wake. One saved upload failure followed by fresh-wake recovery remains open for reliability testing. The increment retains the deployed Worker, permanent-key Secret, temporary-token contract and shared request limits; no Worker deployment or Google configuration change is needed.
 
 ## Verified dashboard deployment
 
