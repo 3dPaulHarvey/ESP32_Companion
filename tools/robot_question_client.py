@@ -25,7 +25,7 @@ def question_metadata(text):
 
 class QuestionDevice(CalibratorDevice):
     def send(self, data):
-        if data not in {b"s", b"w", b"o", b"q", b"j", b"x", b"[", b"]", b"="}:
+        if data not in {b"s", b"w", b"o", b"q", b"j", b"x", b"[", b"]", b"=", b"p", b"y"}:
             raise CheckFailure("The question test cannot send provisioning or unrelated diagnostic commands.")
         if data != b"s" and not self.trusted:
             raise CheckFailure("Development board identity has not been verified.")
@@ -121,10 +121,11 @@ class QuestionClient(RobotClient):
         d = self.device
         d.interruptible = False
         try:
-            if d.connection.is_open and d.trusted:
+            if d.connection.is_open and d.trusted and not d.standalone_control_lost:
                 self.cancel_and_idle()
                 start = d.send(b"o")
                 d.wait(r"HardwareDiagnostics: WIFI (?:off;|already off;)", start, timeout=20)
                 self.hold(False)
         finally:
-            d.connection.close(); d.held = False
+            try: self.resume_standalone()
+            finally: d.connection.close(); d.held = False

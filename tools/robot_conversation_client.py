@@ -64,15 +64,16 @@ class ConversationDevice(CalibratorDevice):
         super().__init__(callback, cancel, closing)
         self.conversation_owned = False; self.wake_waiting = False
         self.job_start = 0; self.after_turn = 0; self.exercise = "followup"; self.captures = []
+        self.trigger_pattern = TRIGGER
 
     def send(self, data):
-        if data not in {b"s", b"w", b"o", b"j", b"x", b"[", b"]", b"=", b"c", b"z"}:
+        if data not in {b"s", b"w", b"o", b"j", b"x", b"[", b"]", b"=", b"c", b"z", b"p", b"y"}:
             raise CheckFailure("The conversation tester cannot send manual questions, fixtures or provisioning commands.")
         if data != b"s" and not self.trusted: raise CheckFailure("Development board identity has not been verified.")
         return MicrophoneDevice.send(self, data)
 
     def keepalive(self):
-        if (self.held or self.conversation_owned) and time.monotonic() - self.last_heartbeat >= 2:
+        if (self.held or self.conversation_owned or self.standalone_paused) and time.monotonic() - self.last_heartbeat >= 2:
             self.send(b"="); self.last_heartbeat = time.monotonic()
 
     def read(self):
@@ -82,6 +83,7 @@ class ConversationDevice(CalibratorDevice):
         self.line_tail += self.text[previous:]
         while "\n" in self.line_tail:
             line, self.line_tail = self.line_tail.split("\n", 1)
+            self.check_standalone_control(line)
             if self.held and "CALIBRATOR_RELEASE reason=lease_expired" in line:
                 self.held = False; raise CheckFailure("Test control expired. Reconnect before another conversation.")
             if not self.observing_capture: continue
@@ -92,7 +94,7 @@ class ConversationDevice(CalibratorDevice):
                 raise CheckFailure("Conversation control expired; the robot is cancelling. Reconnect when ready.")
             if "CompanionQuestion: REQUEST_REJECTED" in line or "CompanionQuestion: CAPTURE_DISCARDED" in line:
                 raise CheckFailure("The robot could not start this question; its input was cleared.")
-            m = re.search(TRIGGER, line)
+            m = re.search(self.trigger_pattern, line)
             if m:
                 self.wake_waiting = False
                 self.callback("wake_triggered", {"cycle": int(m[1]), "wake_count": int(m[2])})

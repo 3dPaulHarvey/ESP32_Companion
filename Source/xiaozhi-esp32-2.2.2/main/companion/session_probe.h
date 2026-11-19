@@ -9,6 +9,8 @@ void Poll(std::int64_t now_us);
 void PrintStatus();
 #if CONFIG_COMPANION_MICROPHONE_PREP
 bool IsBusy();
+bool IsConfigured();
+bool AdmissionOpen(std::int64_t now_us);
 void SetCalibrationGuard(bool active);
 #endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
@@ -23,7 +25,9 @@ bool RequestQuestion(std::uint32_t capture_id);
 void CancelQuestion();
 bool QuestionCancelled();
 #if CONFIG_COMPANION_FOLLOWUP
-bool RequestConversation(std::uint32_t capture_id);
+enum class ConversationOwner { Desktop, Standalone };
+bool RequestConversation(std::uint32_t capture_id, ConversationOwner owner = ConversationOwner::Desktop);
+bool LastConversationSucceeded();
 bool ConversationActive();
 unsigned ConversationTurn();
 void SetConversationStage(VoiceStage stage, unsigned turn);
@@ -33,7 +37,7 @@ bool SubmitFollowupCapture(std::uint32_t capture_id);
 std::uint32_t TakeFollowupCaptureId();
 void HeartbeatConversation(std::int64_t now_us);
 #if COMPANION_QUESTION_FIXTURE
-bool RequestConversationFixture();
+bool RequestConversationFixture(ConversationOwner owner = ConversationOwner::Desktop);
 #endif
 #endif
 #if COMPANION_QUESTION_FIXTURE

@@ -11,6 +11,8 @@
 #include "audio/local_capture_config.h"
 #include "audio/calibration_lease.h"
 #include "companion/wake_question_policy.h"
+#include "companion/standalone_policy.h"
+#include <cstring>
 #if CONFIG_COMPANION_SESSION_PROBE
 #include "companion/session_probe.h"
 #endif
@@ -35,6 +37,14 @@
 
 namespace {
 constexpr char kTag[] = "HardwareDiagnostics";
+#if CONFIG_COMPANION_STANDALONE
+// Developer synthetic images never automatically upload room audio.
+#if COMPANION_QUESTION_FIXTURE
+constexpr bool kAutomaticWake = false;
+#else
+constexpr bool kAutomaticWake = true;
+#endif
+#endif
 #if CONFIG_COMPANION_SESSION_PROBE
 constexpr char kCloudMode[] = "manual-session-probe";
 #else
@@ -131,7 +141,11 @@ const char* WifiEventName(WifiEvent event) {
     auto usb_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_config));
     usb_serial_jtag_vfs_use_driver();
+#if CONFIG_COMPANION_STANDALONE
+    ESP_LOGI(kTag, "MODE standalone companion; cloud=%s; WiFi=auto", kCloudMode);
+#else
     ESP_LOGI(kTag, "MODE local diagnostics; cloud=%s; WiFi=off", kCloudMode);
+#endif
     auto& board = Board::GetInstance();
     auto& display = *board.GetDisplay();
     auto& codec = *board.GetAudioCodec();
@@ -211,6 +225,13 @@ const char* WifiEventName(WifiEvent event) {
     auto reported_conversation_stage = CompanionSessionProbe::VoiceStage::Idle;
     unsigned reported_conversation_turn = 0;
 #endif
+#if CONFIG_COMPANION_STANDALONE
+    companion_standalone::Policy standalone;
+    bool conversation_capture_autonomous = false, conversation_active_autonomous = false;
+    uint32_t recording_reported = 0;
+    const char* idle_status = nullptr;
+    ESP_LOGI("Standalone", "FEATURE version=1 boot_wifi=1 auto_wake=%d max_turns=2 pc_heartbeat=0 control_lease_ms=10000 failure_cooldown_ms=30000", kAutomaticWake);
+#endif
     bool manual_voice_active = false;
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
     bool question_capture = false;
@@ -223,6 +244,37 @@ const char* WifiEventName(WifiEvent event) {
     uint32_t completed_reported = 0;
     const char* abort_reason = "none";
     ESP_LOGI("LocalCompanion", "STATE IDLE mode=bounded-pcm-capture capture=%s cloud=%s", companion_capture::kLabel, kCloudMode);
+
+    auto start_wifi = [&]() {
+        if (wifi_stop_pending) {
+            ESP_LOGW(kTag, "WIFI shutdown pending; wait for WIFI off");
+            return false;
+        }
+        if (!wifi.IsInitialized()) {
+            WifiManagerConfig config;
+            config.language = "en-US";
+            config.station_scan_min_interval_seconds = 5;
+            config.station_scan_max_interval_seconds = 30;
+            ESP_ERROR_CHECK(wifi.Initialize(config) ? ESP_OK : ESP_FAIL);
+            wifi.SetEventCallback([](WifiEvent event) {
+                ESP_LOGI(kTag, "WIFI event=%s cloud=%s", WifiEventName(event), kCloudMode);
+            });
+            // The existing manager holds its mutex while unregistering Wi-Fi
+            // callbacks during StopStation(). Dispatch shutdown on their own
+            // default loop to avoid event-loop/manager lock inversion.
+            ESP_ERROR_CHECK(esp_event_handler_instance_register(DIAGNOSTIC_WIFI_EVENT, 0,
+                [](void* context, esp_event_base_t, int32_t, void*) {
+                    WifiManager::GetInstance().StopStation();
+                    static_cast<std::atomic<bool>*>(context)->store(true, std::memory_order_release);
+                }, &wifi_stop_complete, &stop_handler));
+        }
+        if (!wifi_active) {
+            wifi.StartStation();
+            wifi_active = true;
+            ESP_LOGI(kTag, "WIFI started with saved credentials; cloud=%s", kCloudMode);
+        }
+        return true;
+    };
 
     auto arm_wake = [&]() {
         if (!capture_request_pending && !manual_voice_active && !calibration_lease.held() && !wake_armed) {
@@ -283,7 +335,11 @@ const char* WifiEventName(WifiEvent event) {
                     const bool wants_conversation = conversation_capture;
                     conversation_capture = false;
                     const bool requested = cycle.completed() != completed_reported && (wants_conversation
-                        ? CompanionSessionProbe::RequestConversation(capture_request_id) : CompanionSessionProbe::RequestQuestion(capture_request_id));
+                        ? CompanionSessionProbe::RequestConversation(capture_request_id
+#if CONFIG_COMPANION_STANDALONE
+                            , conversation_capture_autonomous ? CompanionSessionProbe::ConversationOwner::Standalone : CompanionSessionProbe::ConversationOwner::Desktop
+#endif
+                        ) : CompanionSessionProbe::RequestQuestion(capture_request_id));
 #else
                     const bool requested = cycle.completed() != completed_reported && CompanionSessionProbe::RequestQuestion(capture_request_id);
 #endif
@@ -292,6 +348,9 @@ const char* WifiEventName(WifiEvent event) {
 #if CONFIG_COMPANION_FOLLOWUP
                         conversation_active_ui = wants_conversation;
                         if (wants_conversation) {
+#if CONFIG_COMPANION_STANDALONE
+                            conversation_active_autonomous = conversation_capture_autonomous;
+#endif
                             manual_question_active = false;
                             reported_conversation_stage = CompanionSessionProbe::VoiceStage::Idle;
                         }
@@ -301,7 +360,13 @@ const char* WifiEventName(WifiEvent event) {
                     } else {
                         audio.DiscardQuestionAudio(capture_request_id);
                         ESP_LOGI("CompanionQuestion", "CAPTURE_DISCARDED request=%lu input_cleared=1", static_cast<unsigned long>(capture_request_id));
+#if CONFIG_COMPANION_STANDALONE
+                        if (wants_conversation && conversation_capture_autonomous) standalone.Finished(esp_timer_get_time(), false);
+#endif
                     }
+#if CONFIG_COMPANION_STANDALONE
+                    conversation_capture_autonomous = false;
+#endif
 #if CONFIG_COMPANION_FOLLOWUP
                     }
 #endif
@@ -354,6 +419,13 @@ const char* WifiEventName(WifiEvent event) {
 
     while (true) {
         const int64_t now = esp_timer_get_time();
+#if CONFIG_COMPANION_STANDALONE
+        if (standalone.Expire(now)) {
+            handled_wakes = wake_count.load(std::memory_order_relaxed);
+            ESP_LOGI("Standalone", "CONTROL_RELEASE reason=lease_expired paused=0");
+        }
+        if (!standalone.paused() && standalone.wifi_wanted() && !wifi_active && !wifi_stop_pending) start_wifi();
+#endif
 #if CONFIG_COMPANION_SESSION_PROBE
         CompanionSessionProbe::Poll(now);
 #endif
@@ -424,6 +496,13 @@ const char* WifiEventName(WifiEvent event) {
                     // Release any producer-owned completed segment before rearming.
                     audio.DiscardQuestionAudio(capture_request_id);
                     CompanionSessionProbe::TakeFollowupCaptureId();
+#if CONFIG_COMPANION_STANDALONE
+                    if (conversation_active_autonomous) {
+                        standalone.Finished(now, CompanionSessionProbe::LastConversationSucceeded());
+                        ESP_LOGI("Standalone", "CONVERSATION_FINISHED ok=%d cooldown_ms=%u", CompanionSessionProbe::LastConversationSucceeded(), standalone.cooldown_ms(now));
+                    }
+                    conversation_active_autonomous = false;
+#endif
                     manual_voice_active = conversation_active_ui = manual_voice_speaking = manual_question_active = false;
                     CompanionSessionProbe::SetQuestionCaptureGuard(false);
                     CompanionSessionProbe::AcknowledgeVoice();
@@ -454,6 +533,13 @@ const char* WifiEventName(WifiEvent event) {
                 manual_question_active = false;
 #endif
             }
+        }
+#endif
+#if CONFIG_COMPANION_STANDALONE
+        if (cycle.state() == LocalCompanionState::Listening && question_capture && capture_request_pending &&
+            recording_reported != capture_request_id && audio.IsLocalCaptureRecording(capture_request_id)) {
+            recording_reported = capture_request_id; display.SetStatus("ASK NOW");
+            ESP_LOGI("Standalone", "UI state=ASK_NOW request=%lu", static_cast<unsigned long>(capture_request_id));
         }
 #endif
         LocalPcmCaptureResult capture_result;
@@ -514,6 +600,9 @@ const char* WifiEventName(WifiEvent event) {
 #if CONFIG_COMPANION_FOLLOWUP
                     conversation_capture = arm_conversation;
 #endif
+#if CONFIG_COMPANION_STANDALONE
+                    conversation_capture_autonomous = false;
+#endif
                     ESP_LOGI("CloudWake", "TRIGGER cycle=%lu wake_count=%lu source=model",
                         static_cast<unsigned long>(cycle.started()), static_cast<unsigned long>(handled_wakes));
                 } else {
@@ -523,7 +612,21 @@ const char* WifiEventName(WifiEvent event) {
                 }
             } else
 #endif
-            begin_cycle(now, "voice");
+            {
+#if CONFIG_COMPANION_STANDALONE
+                const auto decision = standalone.Decide(now, wifi.IsConnected() && !wifi_stop_pending,
+                    CompanionSessionProbe::IsConfigured(), CompanionSessionProbe::AdmissionOpen(now));
+                if (kAutomaticWake && decision == companion_standalone::Policy::Decision::Cloud && begin_question(now, "voice_question")) {
+                    conversation_capture = conversation_capture_autonomous = true;
+                    ESP_LOGI("Standalone", "TRIGGER cycle=%lu wake_count=%lu source=model", static_cast<unsigned long>(cycle.started()), static_cast<unsigned long>(handled_wakes));
+                } else {
+                    ESP_LOGI("Standalone", "WAKE_LOCAL reason=%s", !kAutomaticWake ? "diagnostic_fixture" : decision == companion_standalone::Policy::Decision::Cloud ? "local_busy" : companion_standalone::DecisionName(decision));
+                    begin_cycle(now, "voice");
+                }
+#else
+                begin_cycle(now, "voice");
+#endif
+            }
         }
         const auto previous = cycle.state();
         if (cycle.Tick(now)) {
@@ -553,6 +656,19 @@ const char* WifiEventName(WifiEvent event) {
             }
 #endif
             switch (command) {
+#if CONFIG_COMPANION_STANDALONE
+                case 'p':
+                    if (!manual_voice_active && !capture_request_pending && cycle.state() == LocalCompanionState::Idle && !CompanionSessionProbe::IsBusy()) {
+                        standalone.Pause(now);
+                        handled_wakes = wake_count.load(std::memory_order_relaxed);
+                        ESP_LOGI("Standalone", "CONTROL paused=1 lease_ms=10000");
+                    } else ESP_LOGW("Standalone", "CONTROL_REJECTED reason=busy");
+                    break;
+                case 'y':
+                    standalone.Resume(); handled_wakes = wake_count.load(std::memory_order_relaxed);
+                    ESP_LOGI("Standalone", "CONTROL paused=0 wifi_wanted=%d", standalone.wifi_wanted());
+                    break;
+#endif
 #if CONFIG_COMPANION_CLOUD_WAKE
                 case 'a':
 #if CONFIG_COMPANION_FOLLOWUP
@@ -585,7 +701,13 @@ const char* WifiEventName(WifiEvent event) {
                     if (!manual_voice_active && !calibration_lease.held() && !capture_request_pending &&
                         cycle.state() == LocalCompanionState::Idle && audio.IsIdle() &&
 #if CONFIG_COMPANION_FOLLOWUP
-                        CompanionSessionProbe::RequestConversationFixture()) {
+                        CompanionSessionProbe::RequestConversationFixture(
+#if CONFIG_COMPANION_STANDALONE
+                            CompanionSessionProbe::ConversationOwner::Standalone
+#else
+                            CompanionSessionProbe::ConversationOwner::Desktop
+#endif
+                        )) {
                         conversation_active_ui = true;
                         reported_conversation_stage = CompanionSessionProbe::VoiceStage::Idle;
 #else
@@ -609,6 +731,9 @@ const char* WifiEventName(WifiEvent event) {
                     if (begin_question(now, "question")) {
 #if CONFIG_COMPANION_FOLLOWUP
                         conversation_capture = false;
+#endif
+#if CONFIG_COMPANION_STANDALONE
+                        conversation_capture_autonomous = false;
 #endif
                     }
                     break;
@@ -636,6 +761,9 @@ const char* WifiEventName(WifiEvent event) {
 #endif
 #if CONFIG_COMPANION_FOLLOWUP
                     CompanionSessionProbe::HeartbeatConversation(now);
+#endif
+#if CONFIG_COMPANION_STANDALONE
+                    standalone.Heartbeat(now);
 #endif
                     break;
                 case ']':
@@ -694,6 +822,11 @@ const char* WifiEventName(WifiEvent event) {
                 case 's':
                     PrintMemory();
                     PrintCapturePolicy();
+#if CONFIG_COMPANION_STANDALONE
+                    ESP_LOGI("Standalone", "STATUS paused=%d wifi_wanted=%d cooldown_ms=%u admission_open=%d",
+                        standalone.paused(), standalone.wifi_wanted(), standalone.cooldown_ms(now), CompanionSessionProbe::AdmissionOpen(now));
+                    ESP_LOGI("Standalone", "FEATURE version=1 boot_wifi=1 auto_wake=%d max_turns=2 pc_heartbeat=0 control_lease_ms=10000 failure_cooldown_ms=30000", kAutomaticWake);
+#endif
 #if CONFIG_COMPANION_CLOUD_WAKE
                     ESP_LOGI("CloudWake", "STATUS armed=%d", cloud_wake.waiting());
 #endif
@@ -727,37 +860,15 @@ const char* WifiEventName(WifiEvent event) {
                         ESP_LOGI("LocalCompanion", "COMMAND_IGNORED command=t state=%s", LocalCompanionCycle::StateName(cycle.state()));
                     }
                     break;
-                case 'w': {
-                    if (wifi_stop_pending) {
-                        ESP_LOGW(kTag, "WIFI shutdown pending; wait for WIFI off");
-                        break;
-                    }
-                    if (!wifi.IsInitialized()) {
-                        WifiManagerConfig config;
-                        config.language = "en-US";
-                        config.station_scan_min_interval_seconds = 5;
-                        config.station_scan_max_interval_seconds = 30;
-                        ESP_ERROR_CHECK(wifi.Initialize(config) ? ESP_OK : ESP_FAIL);
-                        wifi.SetEventCallback([](WifiEvent event) {
-                            ESP_LOGI(kTag, "WIFI event=%s cloud=%s", WifiEventName(event), kCloudMode);
-                        });
-                        // The existing manager holds its mutex while unregistering Wi-Fi
-                        // callbacks during StopStation(). Dispatch shutdown on their own
-                        // default loop to avoid event-loop/manager lock inversion.
-                        ESP_ERROR_CHECK(esp_event_handler_instance_register(DIAGNOSTIC_WIFI_EVENT, 0,
-                            [](void* context, esp_event_base_t, int32_t, void*) {
-                                WifiManager::GetInstance().StopStation();
-                                static_cast<std::atomic<bool>*>(context)->store(true, std::memory_order_release);
-                            }, &wifi_stop_complete, &stop_handler));
-                    }
-                    if (!wifi_active) {
-                        wifi.StartStation();
-                        wifi_active = true;
-                        ESP_LOGI(kTag, "WIFI started with saved credentials; cloud=%s", kCloudMode);
-                    }
-                    break;
-                }
+                case 'w':
+#if CONFIG_COMPANION_STANDALONE
+                    standalone.NetworkCommand(true);
+#endif
+                    start_wifi(); break;
                 case 'o':
+#if CONFIG_COMPANION_STANDALONE
+                    standalone.NetworkCommand(false);
+#endif
                     if (wifi_active && !wifi_stop_pending) {
                         wifi_stop_pending = true;
                         ESP_ERROR_CHECK(esp_event_post(DIAGNOSTIC_WIFI_EVENT, 0, nullptr, 0, pdMS_TO_TICKS(100)));
@@ -792,6 +903,14 @@ const char* WifiEventName(WifiEvent event) {
             PrintMemory();
             memory_deadline = now + 10000000;
         }
+#if CONFIG_COMPANION_STANDALONE
+        if (!manual_voice_active && !capture_request_pending && cycle.state() == LocalCompanionState::Idle && !face_step) {
+            const char* status = standalone.paused() ? "READY" : !standalone.wifi_wanted() ? "LOCAL" :
+                !wifi.IsConnected() ? "WIFI..." : !CompanionSessionProbe::IsConfigured() ? "SETUP" :
+                standalone.cooldown_ms(now) || !CompanionSessionProbe::AdmissionOpen(now) ? "WAIT" : "READY";
+            if (!idle_status || std::strcmp(idle_status, status)) { display.SetStatus(status); idle_status = status; }
+        } else idle_status = nullptr;
+#endif
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }

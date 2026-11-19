@@ -17,7 +17,9 @@ Last updated: 2026-11-18. Development device: **COM26**, MAC **44:bd:8d:ec:38:e0
 
 The **wake** profile passed ten unattended guard/recovery checks and three real wake/question/answer/READY cycles, with correct clear answers confirmed by the user and zero input/output clipping. [Wake results](ESP32_WAKE.md).
 
-COM26 now runs the verified **followup** profile: one explicit conversation arm permits two questions on one connection and a local quiet timeout. A quiet-control trial and two full real conversations pass, including fresh wake, five correct clear answers and zero clipping across all eight captures/five playbacks. Synthetic playback, active cancellation, owner-loss recovery and ten normal-image guard checks also pass. Boot stays offline/unarmed, with the same microphone gain/window and wiring. [Follow-up results](ESP32_FOLLOWUP.md).
+The verified **followup** checkpoint permits two questions on one connection per Desktop arm and a local quiet timeout. A quiet-control trial and two full real conversations pass, including fresh wake, five correct clear answers and zero clipping across all eight captures/five playbacks. Synthetic playback, active cancellation, owner-loss recovery and ten normal-image guard checks also pass. That profile boots offline/unarmed. [Follow-up results](ESP32_FOLLOWUP.md).
+
+COM26 now runs **standalone**, installed for physical verification. Saved Wi-Fi starts automatically; an online physical wake starts the same bounded two-answer conversation without a PC arm or heartbeat. ASK NOW indicates the recording window. Eight normal-image boot/network/diagnostic/observer checks pass, as does a synthetic two-answer exchange with serial closed for 45 seconds. Gain, capture length and wiring are unchanged. Real standalone speech and cold boot on a separate USB supply remain pending in **Robot Standalone Test**; extended uptime/outage testing follows. [Standalone procedure](ESP32_STANDALONE.md).
 
 ## Wiring to preserve
 

@@ -17,20 +17,25 @@ class CalibratorDevice(MicrophoneDevice):
         self.callback, self.cancel, self.closing = callback, cancel, closing
         self.trusted = False
         self.held = False
+        self.standalone_paused = False
+        self.standalone_control_lost = False
         self.last_heartbeat = 0
         self.interruptible = True
         self.observing_capture = False
         self.line_tail = ""
 
+    def protocol(self):
+        return super().protocol(require_capture=True)
+
     def send(self, data):
-        if data not in {b"s", b"n", b"x", b"o", b"[", b"]", b"="}:
+        if data not in {b"s", b"n", b"x", b"o", b"[", b"]", b"=", b"p", b"y"}:
             raise CheckFailure("The calibrator cannot issue cloud or provisioning commands.")
         if data != b"s" and not self.trusted:
             raise CheckFailure("Development board identity has not been verified.")
         return super().send(data)
 
     def keepalive(self):
-        if self.held and time.monotonic() - self.last_heartbeat >= 2:
+        if (self.held or self.standalone_paused) and time.monotonic() - self.last_heartbeat >= 2:
             self.send(b"=")
             self.last_heartbeat = time.monotonic()
 
@@ -43,6 +48,7 @@ class CalibratorDevice(MicrophoneDevice):
         self.line_tail += self.text[previous:]
         while "\n" in self.line_tail:
             line, self.line_tail = self.line_tail.split("\n", 1)
+            self.check_standalone_control(line)
             if self.held and "MicrophonePrep: CALIBRATOR_RELEASE reason=lease_expired" in line:
                 self.held = False
                 raise CheckFailure("Calibration control expired, for example after PC sleep. Reconnect before taking another sample.")
@@ -57,6 +63,12 @@ class CalibratorDevice(MicrophoneDevice):
                 self.callback("wake_detected", {})
         if len(self.line_tail) > 8192:
             raise CheckFailure("Unexpected serial message size; contents suppressed.")
+
+    def check_standalone_control(self, line):
+        if self.standalone_paused and ("Standalone: CONTROL_RELEASE reason=lease_expired" in line or "Standalone: STATUS paused=0" in line):
+            self.standalone_paused = False
+            self.standalone_control_lost = True
+            raise CheckFailure("Standalone test control expired. The robot restored automatic operation; reconnect before another controlled sample.")
 
     def passed(self, label, **metadata):
         self.checks.append({"case": label, "passed": True, **metadata})
@@ -79,6 +91,19 @@ class RobotClient:
         device.wait(r"MicrophonePrep: CALIBRATOR_PROTOCOL version=1 lease_ms=10000 recording_event=1", start, timeout=5)
         device.wait(r"LocalCompanion: STATUS state=IDLE .*capture=local-4s pending=0", start, timeout=5)
         status = device.wait(r"HardwareDiagnostics: STATUS wakes=\d+ WiFi=([a-z]+) connected=([01])", start)
+        # Standalone FEATURE precedes LocalCompanion STATUS in each response.
+        # Wait for that response before selecting the control contract, even
+        # when the first identity message came from a partially received boot.
+        if "Standalone: FEATURE version=1 " in device.text[start:]:
+            start = device.send(b"p")
+            try:
+                response = device.wait(r"Standalone: (CONTROL paused=1 lease_ms=10000|CONTROL_REJECTED reason=busy)", start)
+                if response[1].startswith("CONTROL_REJECTED"):
+                    raise CheckFailure("The autonomous robot is busy. Wait for READY and reconnect the controlled tester.")
+            except CheckFailure:
+                device.standalone_control_lost = True
+                raise
+            device.standalone_paused = True; device.standalone_control_lost = False; device.last_heartbeat = time.monotonic()
         if status[1] == "on":
             start = device.send(b"o")
             device.wait(r"HardwareDiagnostics: WIFI off; wake remains local;", start)
@@ -138,12 +163,21 @@ class RobotClient:
         device = self.device
         device.interruptible = False
         try:
-            if device.connection.is_open and device.trusted:
+            if device.connection.is_open and device.trusted and not device.standalone_control_lost:
                 self.cancel_and_idle()
                 self.hold(False)
         finally:
-            device.connection.close()
-            device.held = False
+            try: self.resume_standalone()
+            finally:
+                device.connection.close()
+                device.held = False
+
+    def resume_standalone(self):
+        device = self.device
+        if device.standalone_paused and device.connection.is_open and device.trusted:
+            device.standalone_paused = False
+            start = device.send(b"y")
+            device.wait(r"Standalone: CONTROL paused=0 wifi_wanted=[01]", start, timeout=5)
 
 
 class DemoRobot:

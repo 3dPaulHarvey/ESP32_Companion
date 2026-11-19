@@ -2,14 +2,14 @@ param(
     [ValidateSet('build', 'flash', 'monitor', 'reconfigure', 'merge-bin')]
     [string]$Action = 'build',
     [string]$Port = 'COM26',
-    [ValidateSet('baseline', 'diagnostics', 'session', 'gemini', 'voice', 'microphone', 'question', 'wake', 'followup')]
+    [ValidateSet('baseline', 'diagnostics', 'session', 'gemini', 'voice', 'microphone', 'question', 'wake', 'followup', 'standalone')]
     [string]$Profile = 'baseline',
     [string]$BuildRoot,
     [switch]$FixtureCheck
 )
 
 $ErrorActionPreference = 'Stop'
-if ($FixtureCheck -and $Profile -notin @('question', 'followup')) { throw 'Synthetic fixtures are restricted to question and followup diagnostic profiles.' }
+if ($FixtureCheck -and $Profile -notin @('question', 'followup', 'standalone')) { throw 'Synthetic fixtures are restricted to question, followup and standalone diagnostic profiles.' }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $externalBuildRoot = if ($BuildRoot) { [System.IO.Path]::GetFullPath($BuildRoot) } else { $null }
 $firmwareRoot = Join-Path $projectRoot 'Source\xiaozhi-esp32-2.2.2'
@@ -18,7 +18,7 @@ if (-not (Test-Path -LiteralPath $activation)) {
     throw "ESP-IDF v5.5.2 activation script missing: $activation"
 }
 . $activation
-if ($Profile -in @('session', 'gemini', 'voice', 'microphone', 'question', 'wake', 'followup') -and $Action -eq 'flash') {
+if ($Profile -in @('session', 'gemini', 'voice', 'microphone', 'question', 'wake', 'followup', 'standalone') -and $Action -eq 'flash') {
     if ($Port -ne 'COM26') { throw 'Cloud diagnostic profiles may be flashed only to the development board on COM26.' }
     $identityOutput = & "$env:IDF_PYTHON_ENV_PATH\Scripts\python.exe" -m esptool --chip esp32s3 --port $Port read_mac 2>&1
     if ($LASTEXITCODE -ne 0 -or ($identityOutput -join "`n") -notmatch '(?i)MAC: 44:bd:8d:ec:38:e0') {
@@ -45,11 +45,12 @@ try {
         $idfArguments = @('-B', 'build-voice', '-DIDF_TARGET=esp32s3',
             '-DSDKCONFIG=sdkconfig.voice.generated',
             '-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.baseline;config/diagnostics.defaults;config/session.defaults;config/gemini.defaults;config/voice.defaults')
-    } elseif ($Profile -in @('microphone', 'question', 'wake', 'followup')) {
+    } elseif ($Profile -in @('microphone', 'question', 'wake', 'followup', 'standalone')) {
         $captureDefaults = 'sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.baseline;config/diagnostics.defaults;config/session.defaults;config/gemini.defaults;config/voice.defaults;config/microphone.defaults'
-        if ($Profile -in @('question', 'wake', 'followup')) { $captureDefaults += ';config/question.defaults' }
-        if ($Profile -in @('wake', 'followup')) { $captureDefaults += ';config/wake.defaults' }
-        if ($Profile -eq 'followup') { $captureDefaults += ';config/followup.defaults' }
+        if ($Profile -in @('question', 'wake', 'followup', 'standalone')) { $captureDefaults += ';config/question.defaults' }
+        if ($Profile -in @('wake', 'followup', 'standalone')) { $captureDefaults += ';config/wake.defaults' }
+        if ($Profile -in @('followup', 'standalone')) { $captureDefaults += ';config/followup.defaults' }
+        if ($Profile -eq 'standalone') { $captureDefaults += ';config/standalone.defaults' }
         $idfArguments = @('-B', "build-$Profile", '-DIDF_TARGET=esp32s3',
             "-DSDKCONFIG=sdkconfig.$Profile.generated", "-DSDKCONFIG_DEFAULTS=$captureDefaults")
     }

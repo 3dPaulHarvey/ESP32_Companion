@@ -396,6 +396,9 @@ bool AudioService::BeginLocalCapture(uint32_t request_id, bool retain_question) 
         return false;
     }
     local_capture_request_id_ = request_id;
+#if CONFIG_COMPANION_STANDALONE
+    local_capture_recording_id_.store(0);
+#endif
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
     local_capture_retain_question_ = retain_question;
 #endif
@@ -541,6 +544,9 @@ void AudioService::RunLocalCapture() {
                     const auto discard = std::min(received, capture.discard_remaining());
                     if (!recording_reported && discard < received) {
                         recording_reported = true;
+#if CONFIG_COMPANION_STANDALONE
+                        local_capture_recording_id_.store(request_id);
+#endif
                         ESP_LOGI("MicrophonePrep", "RECORDING request=%lu duration_ms=%u",
                             static_cast<unsigned long>(request_id), companion_capture::kDurationMs);
                     }
@@ -590,6 +596,9 @@ void AudioService::RunLocalCapture() {
 #endif
         xEventGroupClearBits(event_group_, AS_EVENT_LOCAL_CAPTURE_RUNNING);
         local_capture_result_ = result;
+#if CONFIG_COMPANION_STANDALONE
+        local_capture_recording_id_.store(0);
+#endif
         local_capture_result_ready_ = true;
         local_capture_requested_ = false;
         local_capture_cancel_requested_ = false;

@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -150,6 +151,9 @@ public:
     bool BeginLocalCapture(uint32_t request_id, bool retain_question = false);
     bool PollLocalCaptureResult(LocalPcmCaptureResult& result);
     void CancelLocalCapture(uint32_t request_id);
+#if CONFIG_COMPANION_STANDALONE
+    bool IsLocalCaptureRecording(uint32_t request_id) const { return request_id && local_capture_recording_id_.load() == request_id; }
+#endif
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
     std::unique_ptr<companion_question::Pcm> TakeQuestionAudio(uint32_t request_id);
     void DiscardQuestionAudio(uint32_t request_id);
@@ -222,6 +226,9 @@ private:
     bool local_capture_requested_ = false;
     bool local_capture_cancel_requested_ = false;
     bool local_capture_result_ready_ = false;
+#if CONFIG_COMPANION_STANDALONE
+    std::atomic<uint32_t> local_capture_recording_id_{0};
+#endif
     LocalPcmCaptureResult local_capture_result_;
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
     bool local_capture_retain_question_ = false;

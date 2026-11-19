@@ -78,6 +78,15 @@ config COMPANION_FOLLOWUP
         two replies, checking a local four-second follow-up capture after
         each reply. Quiet input is discarded locally. Boot stays unarmed.
 
+config COMPANION_STANDALONE
+    bool "Companion autonomous wake conversations"
+    depends on COMPANION_FOLLOWUP
+    default n
+    help
+        Start saved Wi-Fi at boot and allow a local wake to start the bounded
+        two-answer conversation without USB arming or a PC heartbeat. Keep
+        local wake available offline. Diagnostic clients can pause automation.
+
 config OTA_URL
     string "Default OTA URL"
     default "https://api.tenclass.net/xiaozhi/ota/"

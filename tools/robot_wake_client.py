@@ -36,14 +36,14 @@ class WakeDevice(QuestionDevice):
     def send(self, data):
         # There is deliberately no manual q, synthetic f, provisioning or
         # local n command. Only the ESP wake model can start this question.
-        if data not in {b"s", b"w", b"o", b"j", b"x", b"[", b"]", b"=", b"a", b"z"}:
+        if data not in {b"s", b"w", b"o", b"j", b"x", b"[", b"]", b"=", b"a", b"z", b"p", b"y"}:
             raise CheckFailure("The wake test cannot issue manual questions or unrelated commands.")
         if data != b"s" and not self.trusted:
             raise CheckFailure("Development board identity has not been verified.")
         return MicrophoneDevice.send(self, data)
 
     def keepalive(self):
-        if (self.held or self.wake_waiting) and time.monotonic() - self.last_heartbeat >= 2:
+        if (self.held or self.wake_waiting or self.standalone_paused) and time.monotonic() - self.last_heartbeat >= 2:
             self.send(b"=")
             self.last_heartbeat = time.monotonic()
 

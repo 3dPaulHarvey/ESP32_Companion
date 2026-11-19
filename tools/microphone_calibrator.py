@@ -45,6 +45,10 @@ class Worker(threading.Thread):
                         self.emit("connected", self.client.connect())
                     elif command == "capture" and self.client:
                         self.emit("result", self.client.capture(data["kind"]))
+                    elif command == "disconnect":
+                        if self.client: self.client.close()
+                        self.client = None
+                        self.emit("disconnected")
                     elif self.client:
                         self.client.poll()
                 except TrialCancelled:

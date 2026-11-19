@@ -20,6 +20,7 @@
 #include <cstring>
 #include <ctime>
 #include <strings.h>
+#include <mutex>
 
 #include <esp_crt_bundle.h>
 #include <esp_heap_caps.h>
@@ -52,6 +53,7 @@ const char* KindName(Kind kind) {
 }
 bool IsQuestion(Kind kind) { return kind == Kind::Question || kind == Kind::Fixture || IsConversation(kind); }
 std::atomic<bool> busy{false};
+std::atomic<bool> device_configured{false};
 #if CONFIG_COMPANION_MICROPHONE_PREP
 std::atomic<bool> calibration_guard{false};
 #endif
@@ -64,6 +66,18 @@ std::atomic<bool> conversation_active{false};
 std::atomic<unsigned> conversation_turn{0};
 std::atomic<std::uint32_t> followup_capture_id{0};
 std::atomic<std::int64_t> conversation_owner_until{0};
+std::atomic<bool> conversation_pc_owner{true}, conversation_succeeded{false};
+#if CONFIG_COMPANION_STANDALONE
+struct LastConversation {
+    bool valid = false, fixture = false, pc_owner = true;
+    unsigned job = 0;
+    int http = 0;
+    CompanionConversation::Result result{};
+};
+std::mutex last_conversation_mutex;
+LastConversation last_conversation;
+unsigned conversation_job = 0;
+#endif
 #endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
 std::atomic<CompanionSessionProbe::VoiceStage> voice_stage{CompanionSessionProbe::VoiceStage::Idle};
@@ -342,7 +356,11 @@ Result Perform(Kind kind, [[maybe_unused]] std::uint32_t capture_id) {
     return result;
 }
 
-bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0) {
+bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0
+#if CONFIG_COMPANION_FOLLOWUP
+        , CompanionSessionProbe::ConversationOwner owner = CompanionSessionProbe::ConversationOwner::Desktop
+#endif
+        ) {
 #if CONFIG_COMPANION_MICROPHONE_PREP
     if (calibration_guard.load()) { ESP_LOGW(kTag, "REQUEST_REJECTED reason=calibrator_owned"); return false; }
 #endif
@@ -365,11 +383,20 @@ bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0) {
     conversation_turn.store(IsConversation(kind) ? 1 : 0);
     followup_capture_id.store(0);
     conversation_owner_until.store(esp_timer_get_time() + companion_followup::kOwnerLeaseUs);
+    conversation_pc_owner.store(owner == CompanionSessionProbe::ConversationOwner::Desktop);
+    if (IsConversation(kind)) conversation_succeeded.store(false);
+#if CONFIG_COMPANION_STANDALONE
+    if (IsConversation(kind)) ++conversation_job;
+#endif
 #endif
     const auto created = xTaskCreate([](void*) {
         const auto kind = pending_kind;
         const auto started = esp_timer_get_time();
         ESP_LOGI(kTag, "REQUEST_BEGIN kind=%s no_audio_upload=%d", KindName(kind), !IsQuestion(kind));
+#if CONFIG_COMPANION_FOLLOWUP
+        if (IsConversation(kind)) ESP_LOGI("CompanionConversation", "OWNER mode=%s heartbeat_required=%d",
+            conversation_pc_owner.load() ? "desktop" : "standalone", conversation_pc_owner.load());
+#endif
         const auto result = Perform(kind,
 #if CONFIG_COMPANION_GEMINI_QUESTION_PROBE
             pending_capture_id
@@ -408,6 +435,15 @@ bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0) {
                 c.connection.close_sent, c.connection.close_ack, c.connection.close_code, c.completed_turns,
                 c.followup_captures, c.quiet_discards, static_cast<unsigned long>((esp_timer_get_time() - started) / 1000), kind == Kind::ConversationFixture);
             conversation_active.store(false);
+            conversation_succeeded.store(result.ok);
+#if CONFIG_COMPANION_STANDALONE
+            {
+                std::lock_guard<std::mutex> lock(last_conversation_mutex);
+                last_conversation = {true, kind == Kind::ConversationFixture, conversation_pc_owner.load(), conversation_job, result.http_status, c};
+                last_conversation.result.reason = result.reason;
+                last_conversation.result.ok = result.ok;
+            }
+#endif
             const auto abandoned = followup_capture_id.exchange(0);
             if (abandoned) Application::GetInstance().GetAudioService().DiscardQuestionAudio(abandoned);
         }
@@ -449,11 +485,12 @@ bool RequestQuestion(std::uint32_t capture_id) {
 void CancelQuestion() { question_cancelled.store(true); }
 bool QuestionCancelled() { return question_cancelled.load(); }
 #if CONFIG_COMPANION_FOLLOWUP
-bool RequestConversation(std::uint32_t capture_id) {
-    return WifiManager::GetInstance().IsConnected() && Request(Kind::Conversation, capture_id);
+bool RequestConversation(std::uint32_t capture_id, ConversationOwner owner) {
+    return WifiManager::GetInstance().IsConnected() && Request(Kind::Conversation, capture_id, owner);
 }
+bool LastConversationSucceeded() { return conversation_succeeded.load(); }
 #if COMPANION_QUESTION_FIXTURE
-bool RequestConversationFixture() { return WifiManager::GetInstance().IsConnected() && Request(Kind::ConversationFixture); }
+bool RequestConversationFixture(ConversationOwner owner) { return WifiManager::GetInstance().IsConnected() && Request(Kind::ConversationFixture, 0, owner); }
 #endif
 bool ConversationActive() { return conversation_active.load(); }
 unsigned ConversationTurn() { return conversation_turn.load(); }
@@ -471,13 +508,15 @@ bool SubmitFollowupCapture(std::uint32_t capture_id) {
 std::uint32_t TakeFollowupCaptureId() { return followup_capture_id.exchange(0); }
 void HeartbeatConversation(std::int64_t now_us) {
     const auto until = conversation_owner_until.load();
-    if (conversation_active.load() && !question_cancelled.load() && now_us < until)
+    if (conversation_active.load() && conversation_pc_owner.load() && !question_cancelled.load() && now_us < until)
         conversation_owner_until.store(now_us + companion_followup::kOwnerLeaseUs);
 }
 #endif
 #endif
 #if CONFIG_COMPANION_MICROPHONE_PREP
 bool IsBusy() { return busy.load(); }
+bool IsConfigured() { return device_configured.load(); }
+bool AdmissionOpen(std::int64_t now_us) { return now_us >= retry_until_us.load(); }
 void SetCalibrationGuard(bool active) { calibration_guard.store(active); }
 #endif
 #if CONFIG_COMPANION_GEMINI_VOICE_PROBE
@@ -489,6 +528,8 @@ VoiceStage GetVoiceStage() { return voice_stage.load(); }
 void AcknowledgeVoice() { voice_stage.store(VoiceStage::Idle); }
 #endif
 void Initialize() {
+    Credential credential;
+    device_configured.store(LoadCredential(credential));
 #if CONFIG_COMPANION_CLOUD_WAKE
     ESP_LOGI(kTag, "MODE manual-session-probe audio_upload=explicit_or_armed_wake boot_requests=0");
 #elif CONFIG_COMPANION_GEMINI_QUESTION_PROBE
@@ -535,11 +576,21 @@ void PrintStatus() {
 #if CONFIG_COMPANION_FOLLOWUP
     ESP_LOGI("CompanionConversation", "FEATURE version=1 arm=c max_turns=2 followup_ms=4000 owner_lease_ms=10000 boot_armed=0");
 #endif
+#if CONFIG_COMPANION_STANDALONE
+    LastConversation last;
+    { std::lock_guard<std::mutex> lock(last_conversation_mutex); last = last_conversation; }
+    unsigned input_bytes = 0, played = 0;
+    for (const auto& turn : last.result.turns) { input_bytes += turn.input_bytes; played += turn.played_samples; }
+    ESP_LOGI("Standalone", "LAST_CONVERSATION valid=%d job=%u ok=%d http=%d reason=%s turns=%u quiet_discards=%u input_bytes=%u played_samples=%u close_ack=%d close_code=%u fixture=%d owner=%s",
+        last.valid, last.job, last.result.ok, last.http, last.result.reason, last.result.completed_turns,
+        last.result.quiet_discards, input_bytes, played, last.result.connection.close_ack, last.result.connection.close_code, last.fixture,
+        last.pc_owner ? "desktop" : "standalone");
+#endif
 }
 void Poll(std::int64_t now_us) {
     if (provision_frame.Expire(now_us)) ESP_LOGW(kTag, "PROVISION ok=0 reason=frame_timeout");
 #if CONFIG_COMPANION_FOLLOWUP
-    if (conversation_active.load() && now_us >= conversation_owner_until.load() && !question_cancelled.exchange(true))
+    if (conversation_active.load() && conversation_pc_owner.load() && now_us >= conversation_owner_until.load() && !question_cancelled.exchange(true))
         ESP_LOGW("CompanionConversation", "OWNER_EXPIRED cancelled=1");
 #endif
 }
@@ -547,6 +598,7 @@ bool HandleSerialByte(char byte, std::int64_t now_us) {
     const auto event = provision_frame.Feed(byte, now_us);
     if (event == companion_session::ProvisionEvent::Ready) {
         const bool saved = !busy.load() && StoreCredential(provision_frame.credential());
+        if (saved) device_configured.store(true);
         provision_frame.Reset();
         ESP_LOGI(kTag, "PROVISION ok=%d", saved);
         return true;

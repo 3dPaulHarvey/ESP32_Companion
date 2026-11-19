@@ -51,32 +51,40 @@ class DemoConversation(DemoRobot):
 
 
 class ConversationApp:
-    def __init__(self, window, *, demo=False, results=None):
-        self.window = window; self.demo = demo
-        self.root = Path(results or ROOT / "logs" / ("robot-conversation-tests-qa" if demo else "robot-conversation-tests"))
+    def __init__(self, window, *, demo=False, results=None, standalone=False):
+        self.window = window; self.demo = demo; self.standalone = standalone
+        group = "robot-standalone-tests" if standalone else "robot-conversation-tests"
+        self.root = Path(results or ROOT / "logs" / (group + ("-qa" if demo else "")))
         identity = datetime.now().astimezone().strftime("%Y-%m-%d_%H-%M-%S") + "_" + uuid.uuid4().hex[:8]
         self.folder = self.root / identity
         self.data = {"schema_version": 1, "demo": demo, "session_id": identity, "created_at": utc_now(), "status": "in_progress",
             "policy": None, "attempts": [], "raw_audio_saved": False, "transcript_saved": False, "conversation_max_turns": 2,
-            "audio_upload_requires_armed_wake": True, "followup_ms": 4000}
+            "audio_upload_requires_armed_wake": not standalone, "followup_ms": 4000,
+            "standalone": standalone, "observer_only": standalone}
         self.events = queue.Queue(); self.factory = DemoConversation if demo else ConversationClient
+        if standalone and not demo:
+            from robot_standalone_client import StandaloneObserver
+            self.factory = StandaloneObserver
         self.worker = Worker(self.events, client_factory=self.factory)
         self.connected = self.busy = self.closing = self.save_failed = False
         self.current = None; self.recording_started = None; self.expect_speech = True; self.phase = "disconnected"
-        window.title("Robot Follow-up Conversation Test" + (" - Demo" if demo else ""))
+        self.unplugged = False; self.unplug_vars = []
+        window.title(("Robot Standalone Test" if standalone else "Robot Follow-up Conversation Test") + (" - Demo" if demo else ""))
         window.geometry("1000x760"); window.minsize(1000, 760); window.configure(bg="#edf2f7")
         window.protocol("WM_DELETE_WINDOW", self.finish)
         ttk.Style().configure("TButton", font=("Segoe UI", 11), padding=10)
         panel = tk.Frame(window, bg="#edf2f7", padx=26, pady=22); panel.pack(fill="both", expand=True)
-        tk.Label(panel, text="Ask a follow-up without another wake word", bg="#edf2f7", fg="#23344a", font=("Segoe UI", 22, "bold")).pack(anchor="w")
-        tk.Label(panel, text="Run the quiet check first, then the two-question check twice. Each trial starts when you click Arm.\nSpeak to the robot from 1-2 feet away. No recording or transcript is saved.",
+        tk.Label(panel, text="Try the robot without PC control" if standalone else "Ask a follow-up without another wake word", bg="#edf2f7", fg="#23344a", font=("Segoe UI", 22, "bold")).pack(anchor="w")
+        intro = ("This app only observes. Run one quiet check and two follow-up checks, then try USB power alone.\nThe robot starts on its wake word. No recording or transcript is saved." if standalone else
+            "Run the quiet check first, then the two-question check twice. Each trial starts when you click Arm.\nSpeak to the robot from 1-2 feet away. No recording or transcript is saved.")
+        tk.Label(panel, text=intro,
             bg="#edf2f7", fg="#53677d", font=("Segoe UI", 11), justify="left").pack(anchor="w", pady=(8, 15))
         options = tk.Frame(panel, bg="#edf2f7"); options.pack(fill="x", pady=(0, 12))
         self.exercise = tk.StringVar(value="quiet")
         self.radios = [ttk.Radiobutton(options, text=label, value=value, variable=self.exercise) for label, value in
             [("1. First answer, then stay quiet", "quiet"), ("2. Two questions, then stay quiet", "followup")]]
         for radio in self.radios: radio.pack(side="left", padx=(0, 20))
-        card = tk.Frame(panel, bg="white", padx=24, pady=18); card.pack(fill="both", expand=True)
+        card = self.card = tk.Frame(panel, bg="white", padx=24, pady=18); card.pack(fill="both", expand=True)
         self.phrase = tk.StringVar(value='First: "What is two plus two?"')
         tk.Label(card, textvariable=self.phrase, bg="white", fg="#176b89", font=("Segoe UI", 22, "bold"), wraplength=880, justify="center").pack(fill="x", pady=(0, 16))
         self.status = tk.StringVar(value="Connect when you are ready")
@@ -84,10 +92,12 @@ class ConversationApp:
         self.status_label.pack(fill="x", pady=(6, 8))
         self.hint = tk.StringVar(value="Connect COM26 and close other robot apps or serial monitors.")
         tk.Label(card, textvariable=self.hint, bg="white", fg="#53677d", font=("Segoe UI", 11), wraplength=870, justify="center").pack(fill="x", pady=(0, 18))
-        row = tk.Frame(card, bg="white"); row.pack(fill="x")
+        row = self.actions = tk.Frame(card, bg="white"); row.pack(fill="x")
         self.connect_button = ttk.Button(row, text="Connect robot", command=self.connect); self.connect_button.pack(side="left")
-        self.arm_button = ttk.Button(row, text="Arm conversation", command=self.start); self.arm_button.pack(side="left", padx=10)
-        self.stop_button = ttk.Button(row, text="Stop", command=self.stop); self.stop_button.pack(side="left")
+        self.arm_button = ttk.Button(row, text="Record next wake" if standalone else "Arm conversation", command=self.start); self.arm_button.pack(side="left", padx=10)
+        self.stop_button = ttk.Button(row, text="Stop observing" if standalone else "Stop", command=self.stop); self.stop_button.pack(side="left")
+        self.unplug_button = ttk.Button(row, text="Unplugged power check", command=self.begin_unplugged)
+        if standalone: self.unplug_button.pack(side="left", padx=10)
         self.confirm = tk.Frame(card, bg="white")
         self.yes_button = ttk.Button(self.confirm, text="Yes - correct speech and quiet idle", command=lambda: self.feedback(True)); self.yes_button.pack(side="left")
         ttk.Button(self.confirm, text="Answer, audio or timeout problem", command=lambda: self.feedback(False)).pack(side="left", padx=10)
@@ -115,20 +125,24 @@ class ConversationApp:
 
     def refresh(self):
         pending = self.current and self.current["state"] == "awaiting_confirmation"
-        self.connect_button.configure(state="disabled" if self.connected or self.busy or self.closing else "normal")
-        enabled = self.connected and not self.busy and not pending and not self.closing and not self.save_failed
+        self.connect_button.configure(state="disabled" if self.connected or self.busy or self.closing or self.unplugged else "normal")
+        enabled = self.connected and not self.busy and not pending and not self.closing and not self.save_failed and not self.unplugged
         self.arm_button.configure(state="normal" if enabled else "disabled")
         self.stop_button.configure(state="normal" if self.busy and self.phase != "connecting" and not self.closing else "disabled")
         quiet_passed = any(a["exercise"] == "quiet" and a["state"] == "verified_by_user" and a["human_confirmed"] is True for a in self.data["attempts"])
         for index, radio in enumerate(self.radios):
-            radio.configure(state="disabled" if self.busy or pending or self.closing or (index == 1 and not quiet_passed) else "normal")
+            radio.configure(state="disabled" if self.busy or pending or self.closing or self.unplugged or (index == 1 and not quiet_passed) else "normal")
+        full_passes = sum(a["exercise"] == "followup" and a["state"] == "verified_by_user" and a["human_confirmed"] is True for a in self.data["attempts"])
+        self.unplug_button.configure(state="normal" if self.standalone and quiet_passed and full_passes >= 2 and not self.busy and not pending and not self.closing and not self.save_failed and not self.unplugged else "disabled")
+        if self.unplug_vars:
+            self.unplug_save_button.configure(state="normal" if all(v.get() for v in self.unplug_vars) and not self.save_failed and not self.closing else "disabled")
         if pending and not self.closing: self.confirm.pack(fill="x", pady=(18, 0))
         else: self.confirm.pack_forget()
 
     def connect(self):
         if not self.worker.is_alive(): self.worker = Worker(self.events, client_factory=self.factory); self.worker.start()
         self.busy = True; self.phase = "connecting"; self.status.set("Checking the connection...")
-        self.hint.set("Wait while the robot, Wi-Fi and Gemini setup are checked. No question starts yet.")
+        self.hint.set("Reading robot status. This app does not arm a wake or contact Gemini." if self.standalone else "Wait while the robot, Wi-Fi and Gemini setup are checked. No question starts yet.")
         self.refresh(); self.worker.commands.put(("connect", {}))
 
     def start(self):
@@ -140,18 +154,55 @@ class ConversationApp:
         if not self.save(): self.refresh(); return
         self.worker.cancel.clear()  # A new click clears an earlier Stop/save failure, before queuing work.
         self.busy = True; self.phase = "conversation"; self.phrase.set('First: "What is two plus two?"')
-        self.status_label.configure(fg="#176b89"); self.status.set("Arming...")
+        self.status_label.configure(fg="#176b89"); self.status.set("Starting observation..." if self.standalone else "Arming...")
         self.refresh(); self.worker.commands.put(("capture", {"kind": self.current["exercise"]}))
 
     def stop(self):
-        self.worker.cancel.set(); self.status.set("Stopping safely...")
-        self.hint.set("Waiting for capture, connection and speaker cleanup.")
+        self.worker.cancel.set(); self.status.set("Stopping observation..." if self.standalone else "Stopping safely...")
+        self.hint.set("The robot continues its own conversation and returns to READY." if self.standalone else "Waiting for capture, connection and speaker cleanup.")
 
     def feedback(self, passed):
         self.current.update(state="verified_by_user" if passed else "user_reported_problem", human_confirmed=passed, reviewed_at=utc_now())
         self.save(); self.status.set("Result saved")
         if passed and self.current["exercise"] == "quiet": self.exercise.set("followup")
-        self.hint.set("Run the two-question check twice with a fresh wake each time, then Finish & close."); self.refresh()
+        self.hint.set("Run two follow-up checks, then click Unplugged power check." if self.standalone else "Run the two-question check twice with a fresh wake each time, then Finish & close."); self.refresh()
+
+    def begin_unplugged(self):
+        if str(self.unplug_button['state']) == "disabled": return
+        self.unplugged = True; self.busy = True; self.phase = "disconnecting"
+        self.data["unplugged_check"] = {"state": "disconnecting", "started_at": utc_now(), "human_only": True,
+            "observer_disconnected": False, "checks": [False, False, False], "human_confirmed": None}
+        self.save(); self.refresh(); self.status.set("Closing the observer...")
+        self.worker.commands.put(("disconnect", {}))
+
+    def show_unplugged(self):
+        self.connected = self.busy = False; self.phase = "unplugged"
+        self.data["unplugged_check"].update(state="in_progress", observer_disconnected=True)
+        self.actions.pack_forget(); self.confirm.pack_forget(); self.phrase.set("Now use a separate USB power supply")
+        self.status.set("Watch the robot's screen")
+        self.hint.set('Unplug the PC USB cable. Power the robot from a USB supply and wait for READY. Say "Hi, E-S-P". At ASK NOW, ask "What is two plus two?". After four, wait for ASK NOW and ask "And what is that number times three?". Expect twelve, then stay quiet until READY.')
+        self.unplug_frame = tk.Frame(self.card, bg="white"); self.unplug_frame.pack(fill="x", pady=(6, 0))
+        labels = ["The robot cold-booted on a separate USB supply, with no PC USB cable.",
+            "One wake gave four, then twelve without a second wake; silence returned it to READY.",
+            "After READY, another fresh wake and question worked."]
+        for label in labels:
+            value = tk.BooleanVar(value=False); self.unplug_vars.append(value)
+            ttk.Checkbutton(self.unplug_frame, text=label, variable=value, command=self.save_unplugged_progress).pack(anchor="w", pady=3)
+        row = tk.Frame(self.unplug_frame, bg="white"); row.pack(fill="x", pady=(10, 0))
+        self.unplug_save_button = ttk.Button(row, text="Save passed power check", command=lambda: self.finish_unplugged(True)); self.unplug_save_button.pack(side="left")
+        ttk.Button(row, text="Save a problem / not completed", command=lambda: self.finish_unplugged(False)).pack(side="left", padx=10)
+        self.save_unplugged_progress(); self.refresh()
+
+    def save_unplugged_progress(self):
+        self.data["unplugged_check"].update(checks=[v.get() for v in self.unplug_vars], state="in_progress", human_confirmed=None)
+        self.save(); self.refresh()
+
+    def finish_unplugged(self, passed):
+        if passed and not all(v.get() for v in self.unplug_vars): return
+        self.data["unplugged_check"].update(state="verified_by_user" if passed else "user_reported_problem",
+            human_confirmed=passed, reviewed_at=utc_now(), checks=[v.get() for v in self.unplug_vars])
+        self.save(); self.status.set("Power check saved" if passed else "Problem saved")
+        self.hint.set("Finish & close. Codex can review the saved checks when you return.")
 
     def finish(self):
         if self.closing: return
@@ -161,7 +212,7 @@ class ConversationApp:
             return
         self.closing = True; self.worker.cancel.set(); self.worker.closing.set()
         self.recording_started = None; self.status.set("Saving and closing...")
-        self.hint.set("Closing Gemini, restoring local wake and turning Wi-Fi off."); self.refresh()
+        self.hint.set("Closing the observer. The robot keeps operating independently." if self.standalone else "Closing Gemini, restoring local wake and turning Wi-Fi off."); self.refresh()
 
     def process_events(self):
         try:
@@ -175,10 +226,11 @@ class ConversationApp:
                     self.closing = self.connected = self.busy = False; self.refresh(); continue
                 if name == "connected":
                     self.connected = True; self.busy = False; self.phase = "idle"; self.data["policy"] = data; self.save()
-                    self.status.set("Ready when you are"); self.hint.set('Click Arm conversation, then say "Hi, E-S-P" once.')
-                elif name == "preflight": self.data["cloud_preflight"] = data["measurement"]; self.save()
+                    self.status.set("Ready when you are"); self.hint.set('Click Record next wake, then say "Hi, E-S-P" once.' if self.standalone else 'Click Arm conversation, then say "Hi, E-S-P" once.')
+                elif name == "disconnected" and self.unplugged: self.show_unplugged()
+                elif name == "preflight": self.data["observer_readiness" if self.standalone else "cloud_preflight"] = data["measurement"]; self.save()
                 elif name == "waiting_wake":
-                    self.status.set("Say Hi, E-S-P"); self.hint.set("Wait for green before asking the first question. Stop cancels this arm.")
+                    self.status.set("Say Hi, E-S-P"); self.hint.set("Wait for green or the robot's ASK NOW before asking. Stop only stops observation." if self.standalone else "Wait for green before asking the first question. Stop cancels this arm.")
                 elif name == "wake_triggered" and self.current:
                     self.current["wake_trigger"] = data; self.save(); self.status.set("Wake heard - preparing...")
                 elif name == "recording" and self.current:
@@ -210,7 +262,7 @@ class ConversationApp:
                 elif name == "cancelled":
                     self.recording_started = None; self.busy = False; self.phase = "idle"
                     if self.current: self.current.update(state="cancelled", ended_at=utc_now()); self.save()
-                    self.status.set("Cancelled - ready to retry")
+                    self.status.set("Observation stopped" if self.standalone else "Cancelled - ready to retry")
                 elif name == "error":
                     self.recording_started = None; self.busy = self.connected = False; self.phase = "disconnected"
                     if self.current: self.current.update(state="error", ended_at=utc_now(), error=data["message"])
@@ -223,12 +275,13 @@ class ConversationApp:
         self.window.after(50, self.process_events)
 
 
-def main():
+def main(*, standalone=False):
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--demo", action="store_true"); args = parser.parse_args()
     window = tk.Tk(); window.withdraw(); instance = None
     try:
-        results = ROOT / "logs" / ("robot-conversation-tests-qa" if args.demo else "robot-conversation-tests")
-        instance = AppInstance(results); ConversationApp(window, demo=args.demo, results=results)
+        group = "robot-standalone-tests" if standalone else "robot-conversation-tests"
+        results = ROOT / "logs" / (group + ("-qa" if args.demo else ""))
+        instance = AppInstance(results); ConversationApp(window, demo=args.demo, results=results, standalone=standalone)
         window.deiconify(); window.mainloop()
     except (OSError, RuntimeError, ValueError) as error:
         messagebox.showerror("Robot conversation test", str(error), parent=window); window.destroy()

@@ -93,8 +93,14 @@ class Device:
         self.connection.rts = False
         self.connection.dtr = self.connection.dtr
 
-    def protocol(self):
+    def protocol(self, *, require_capture=False):
         start = self.send(b"s")
+        if require_capture:
+            # Reopening USB can expose the tail of the preceding owner's
+            # status response. Anchor to a complete capture-policy header
+            # before accepting identity/configuration from this response.
+            header = self.wait(CAPTURE_POLICY, start, timeout=20)
+            start += header.start()
         match = self.wait(r"CompanionSession: PROTOCOL version=1 mac=([0-9a-f:]+) configured=([01]) busy=([01])", start, timeout=20)
         if match[1] != EXPECTED_MAC:
             raise CheckFailure("The serial device is not the verified development ESP32; no provisioning allowed.")
