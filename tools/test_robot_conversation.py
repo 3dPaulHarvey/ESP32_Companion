@@ -47,6 +47,48 @@ def client_with(turns=2, callback=lambda *args: None):
 
 
 class ConversationChecks(unittest.TestCase):
+    def test_partial_upload_transport_codes_are_emitted_before_final_result(self):
+        events = []; client = client_with(callback=lambda name, data: events.append((name, data))); d = client.device
+        trace = ("CompanionConversation: SEND_FAILURE turn=1 opcode=1 expected=1784 returned=-1 elapsed_ms=1001 system_errno=11 socket_errno=0 tls_status=0 tls_error=-26752 tls_flags=0 input_bytes=38400 input_chunks=30 wifi=1 rssi=-57 internal_free=86544\n"
+            "CompanionConversation: WRITE_FAILURE status=timeout written=17 calls=4 waits=2 partials=1 last_return=-26752\n"
+            "CompanionConversation: UPLOAD_HEALTH turn=1 bytes=38400 chunks=30 ended=0 upload_ms=2600 max_send_ms=1001 slow_sends=1\n"
+            "CompanionConversation: CLEANUP reason=write_stream_aborted\n"
+            "CompanionConversation: WRITE_STATS calls=65 waits=2 partials=1 question_retries=0\n")
+        d.connection.chunks = [trace[:135].encode(), trace[135:].encode()]; d.observing_capture = True
+        d.read(); self.assertEqual(events, [])
+        d.read()
+        observed = dict(events)
+        self.assertEqual(observed['transport_failure']['input_bytes'], 38400)
+        self.assertEqual(observed['transport_failure']['rssi'], -57)
+        self.assertEqual(observed['write_failure']['status'], 'timeout')
+        self.assertEqual(observed['write_failure']['last_return'], -26752)
+        self.assertEqual(observed['upload_health']['ended'], 0)
+        self.assertEqual(observed['write_stats']['partials'], 1)
+        self.assertEqual(observed['transport_cleanup']['reason'], 'write_stream_aborted')
+        self.assertNotIn('result', observed)
+
+    def test_tk_transport_diagnostics_save_before_failed_upload(self):
+        with tempfile.TemporaryDirectory(prefix='esp32-upload-diagnostics-ui-') as temp:
+            window = tk.Tk(); app = ConversationApp(window, standalone=True, demo=True, results=Path(temp))
+            try:
+                app.current = {'exercise': 'followup', 'state': 'recording', 'human_confirmed': None, 'captures': []}
+                app.data['attempts'].append(app.current)
+                failure = {'turn': 1, 'opcode': 1, 'expected': 1784, 'returned': -1, 'socket_errno': 0,
+                    'tls_error': -26752, 'input_bytes': 38400, 'input_chunks': 30}
+                app.events.put(('transport_failure', failure, time.monotonic())); app.process_events()
+                saved = json.loads((app.folder / 'session.json').read_text(encoding='utf-8'))
+                self.assertEqual(saved['attempts'][0]['state'], 'recording')
+                self.assertEqual(saved['attempts'][0]['transport_failure'], [failure])
+                app.events.put(('transport_cleanup', {'reason': 'write_stream_aborted'}, time.monotonic()))
+                app.events.put(('error', {'message': 'Conversation audio_send_failed.'}, time.monotonic())); app.process_events()
+                saved = json.loads((app.folder / 'session.json').read_text(encoding='utf-8'))
+                self.assertEqual(saved['attempts'][0]['state'], 'error')
+                self.assertEqual(saved['attempts'][0]['transport_failure'], [failure])
+                self.assertEqual(saved['attempts'][0]['transport_cleanup']['reason'], 'write_stream_aborted')
+                self.assertFalse(saved['raw_audio_saved']); self.assertFalse(saved['transcript_saved'])
+            finally:
+                app.worker.closing.set(); app.worker.cancel.set(); app.worker.join(timeout=3); window.destroy()
+
     def test_two_turns_and_quiet_share_one_connection(self):
         events = []; client = client_with(callback=lambda name, data: events.append((name, data)))
         result = client.capture("followup")

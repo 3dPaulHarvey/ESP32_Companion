@@ -21,6 +21,8 @@ The verified **followup** checkpoint permits two questions on one connection per
 
 COM26 now runs **standalone**, with real autonomous speech/quiet/fresh-wake trials verified and separate-USB-supply cold boot confirmed by the user. Saved Wi-Fi starts automatically; an online physical wake starts the bounded two-answer conversation without a PC arm or heartbeat. ASK NOW indicates the recording window. Eight normal-image boot/network/diagnostic/observer checks and a synthetic exchange with serial closed for 45 seconds also pass. Gain, capture length and wiring are unchanged. One saved upload failure recovered on later wakes; reliability, extended uptime and outage testing remain open. [Standalone results](ESP32_STANDALONE.md).
 
+The subsequent **upload-recovery** update adds bounded partial/temporary TLS writes, persistent numeric failure diagnostics and cancellation before explicit Wi-Fi driver shutdown. Ten fault-injected synthetic sessions / twenty replies and targeted shutdown/link-loss recovery pass. It changes no microphone, display, speaker or wiring configuration. [Investigation and exact image](UPLOAD_RECOVERY.md).
+
 ## Wiring to preserve
 
 Working source: `Source/xiaozhi-esp32-2.2.2/`. Original reference remains under `_Reference_Code/Xiaozhi-for-XiaoESP32S3-master/`.

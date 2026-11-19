@@ -203,6 +203,9 @@ const char* WifiEventName(WifiEvent event) {
     bool wifi_active = false;
     bool wifi_connected = false;
     bool wifi_stop_pending = false;
+#if CONFIG_COMPANION_FOLLOWUP
+    bool wifi_stop_after_conversation = false;
+#endif
     std::atomic<bool> wifi_stop_complete{false};
     esp_event_handler_instance_t stop_handler = nullptr;
     uint32_t handled_wakes = 0;
@@ -246,6 +249,11 @@ const char* WifiEventName(WifiEvent event) {
     ESP_LOGI("LocalCompanion", "STATE IDLE mode=bounded-pcm-capture capture=%s cloud=%s", companion_capture::kLabel, kCloudMode);
 
     auto start_wifi = [&]() {
+#if CONFIG_COMPANION_FOLLOWUP
+        if (wifi_stop_after_conversation) {
+            ESP_LOGW(kTag, "WIFI shutdown queued; wait for WIFI off"); return false;
+        }
+#endif
         if (wifi_stop_pending) {
             ESP_LOGW(kTag, "WIFI shutdown pending; wait for WIFI off");
             return false;
@@ -419,6 +427,15 @@ const char* WifiEventName(WifiEvent event) {
 
     while (true) {
         const int64_t now = esp_timer_get_time();
+#if CONFIG_COMPANION_FOLLOWUP
+        if (wifi_stop_after_conversation && !CompanionSessionProbe::IsBusy()) {
+            wifi_stop_after_conversation = false;
+            if (wifi_active && !wifi_stop_pending) {
+                wifi_stop_pending = true;
+                ESP_ERROR_CHECK(esp_event_post(DIAGNOSTIC_WIFI_EVENT, 0, nullptr, 0, pdMS_TO_TICKS(100)));
+            }
+        }
+#endif
 #if CONFIG_COMPANION_STANDALONE
         if (standalone.Expire(now)) {
             handled_wakes = wake_count.load(std::memory_order_relaxed);
@@ -868,6 +885,17 @@ const char* WifiEventName(WifiEvent event) {
                 case 'o':
 #if CONFIG_COMPANION_STANDALONE
                     standalone.NetworkCommand(false);
+#endif
+#if CONFIG_COMPANION_FOLLOWUP
+                    if (wifi_active && conversation_active_ui && CompanionSessionProbe::IsBusy()) {
+                        // Let the network owner release TLS before stopping
+                        // its Wi-Fi driver. Ordinary link loss still follows
+                        // the bounded transport failure path.
+                        wifi_stop_after_conversation = true;
+                        CompanionSessionProbe::CancelQuestion();
+                        ESP_LOGI(kTag, "WIFI shutdown queued; cancelling conversation first");
+                        break;
+                    }
 #endif
                     if (wifi_active && !wifi_stop_pending) {
                         wifi_stop_pending = true;

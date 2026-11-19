@@ -747,3 +747,34 @@ The unplugged checklist is `verified_by_user`, `observer_disconnected=true`, `hu
 **Resolved Desktop reporting bug:** attempt 6 had a complete successful result and human confirmation at 01:52:41 UTC, before a COM26 access error at 01:52:58. The old app overwrote the confirmed trial's state with `error`. Its metrics and earlier confirmation remain in the unmodified source; the review lists it separately from the clean gate trials. The shared conversation app now records idle connection errors separately and preserves completed, review-pending and confirmed trials. Active-trial errors still fail the trial. All **36 robot/app regression tests** pass after the fix, including two new Tk regression cases (three completed/review states plus an active failure); the earlier full 80-test installation suite remains recorded above.
 
 **Standalone functional gate passed with fresh-wake recovery; robustness remains open.** Installed firmware stays at SHA256 `90c0277461594eef9d143c044725a5cb0b8a0ad9e7b4958d5a4f700f389a81bd`; no flash, Worker, model, TLS, gain or wiring changes were needed for this review. [Detailed results](ESP32_STANDALONE.md).
+
+## 2026-11-18 - Upload send recovery corrected and installed
+
+Investigated the real session's single `audio_send_failed` event. It had HTTP 200 / upgrade 101 but no byte progress or native error codes, so its exact historical cause cannot be recovered. The source JSON and prior review remain intact. Five new back-to-back synthetic conversations passed with original send timing plus numeric instrumentation; that baseline did not reproduce the older failure.
+
+Installed SDK source confirms that WebSocket sends write header and payload separately, while the underlying TLS write can report partial or temporary progress. The conversation client now completes the same unwritten TLS suffix under an absolute budget, handling zero progress and WANT_READ/WANT_WRITE without repeating a frame or question. Fatal/budget/cancel exits make the stream unusable, avoid appending a close frame to a partial payload and preserve the primary failure separately from cleanup. Numeric progress/error/latency data autosaves before final results in both conversation apps. No permanent transport logs, raw response, audio, transcript or credential is saved.
+
+| Verification | Result |
+|---|---|
+| Compiled policy checks | PASS: 155 assertions, including sixteen exact-order/count/temporary/partial/fatal/cancel/deadline cases |
+| Host/app regression | PASS: all 84 tests, including split numeric failure records and persistence before an unsuccessful upload |
+| Baseline repetitions | PASS: five synthetic two-answer conversations before byte-resume changes; original event not reproduced |
+| Deliberate write faults | PASS: ten consecutive synthetic conversations, each with header no-progress, real three-byte short header, real seventeen-byte short payload and temporary WANT_WRITE |
+| Exact completed inputs | PASS: twenty inputs / 2,560,000 PCM bytes / 2,000 audio frames + EOF, one session request and connection per conversation |
+| Replies and recovery | PASS: twenty replies / 1,443,132 played samples, zero output clipping; twenty waits and twenty short writes recovered; no question retry |
+| Quiet/READY | PASS: ten zero-filled quiet segments discarded locally, all sessions acknowledge close 1000 and return to READY |
+| Timing | Uploads 5.052-6.695 s; maximum individual send 89 ms; no 250-ms slow-send threshold crossings |
+| Explicit driver shutdown, final guard | PASS: cancel after one complete 1,280-byte frame; original reason `cancelled`; close acknowledgment/code 1000; then Wi-Fi off and new explicit two-answer session succeeds |
+| Ordinary link disconnect, final guard | PASS: bounded `websocket_read_failed`, partial 1,280-byte progress retained, numeric TLS status 32797 / native code 76, cleanup failure stored separately; automatic Wi-Fi reconnect and a fresh explicit two-answer session succeed |
+| Final normal-image checks | PASS: all eight boot/network/control/calibration/observer checks; no provider request or microphone upload; online, idle, wake armed and serial closed at finish |
+| Secure build/flash/recovery | PASS: correct development MAC/write hashes, NVS retained, strict TLS, private logging compiled out in five transport units, actual credential absent; fixture PCM/f handler/fault strings excluded from normal image |
+
+The initial full-driver-stop test produced a device-fault/reset indication without retaining its native fault type/backtrace. Two immediate repeats returned `wifi_lost` and recovered successfully. The explicit o path was changed to cancel and wait for the TLS owner to finish before stopping its Wi-Fi driver, removing concurrent driver teardown from a live conversation. The post-change targeted shutdown closes cleanly and the separate ordinary link-loss case recovers. The exact cause of that first reset is unproven; this does not establish arbitrary reset/outage immunity.
+
+Ten core fault-recovery cycles used diagnostic SHA256 `d6f9c00c8d6de91a9584af9bfc3957da42abe18e6c124eef7e4cff09d39cfa88`. Subsequent shutdown/link-loss verification used the final diagnostic image `9b3e4e2d1a44b391166dbad515836a33f3858136b925d5ba62149a350a4b0d39`; the byte-resume implementation is unchanged, with added shutdown ordering and bounded close permitted after cancellation. Both diagnostic archives and matching symbols remain private and separate from the normal image.
+
+Final installed normal app: **2,599,264 bytes**, SHA256 `091c6f19f39c2faa4cabaf60292f5566a056036c4ede4d099de84be752824b33`. Exact write files/configuration/symbols/manifest: `recovery/2026-11-18-upload-reliability/built-upload-final/`. Pre-fix full flash: **8,388,608 bytes**, SHA256 `b63891eedd0792b75ae865592d7aec7eef4db07cc825725c5401c5524cf949f3`; its app matches the prior human-verified standalone image. Older backups remain intact. No Worker deployment, model, gain/VAD, GPIO or dependency change.
+
+Ignored evidence: `esp32-upload-baseline-fixtures.json`, `esp32-upload-recovery-ten-cycles.json`, `esp32-upload-guarded-shutdown.json`, `esp32-upload-link-loss.json`, original/repeated driver-stop reports, `robot-upload-recovery-host-tests.log`, `esp32-upload-normal-hardware-qa.json`, build/flash logs and derived `esp32-upload-investigation.json` under `logs/`. The original user session retains SHA256 `fab8d45e76d2c0e5e94bc67f510100264093855576f78b498943ddb847f77340`. Public synthetic audio alone was uploaded during investigation; one final local count/gain capture was not uploaded.
+
+**Send-path correction and controlled recovery verification passed.** This establishes bounded write recovery and resource cleanup, while the old event's exact native trigger remains unknowable from its saved record. Ten actual-voice cycles, prolonged idle and physical AP outage remain later gates. [Implementation, repeatable developer test and evidence](UPLOAD_RECOVERY.md).

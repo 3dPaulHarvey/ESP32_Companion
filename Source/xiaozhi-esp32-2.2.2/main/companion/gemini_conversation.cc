@@ -3,6 +3,7 @@
 #include "gemini_voice.h"
 #include "question_audio.h"
 #include "session_probe.h"
+#include "transport_write_policy.h"
 #if COMPANION_QUESTION_FIXTURE
 #include "question_fixture.h"
 #endif
@@ -10,6 +11,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <cerrno>
+#include <esp_tls.h>
 #include <esp_crt_bundle.h>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
@@ -46,6 +49,7 @@ struct Playback {
 class Conversation {
 public:
     CompanionConversation::Result result{};
+    explicit Conversation(bool fixture) : fixture_(fixture) {}
     bool Connect(std::string_view temporary) {
         if (!Alive()) return false;
         if (!path_.data || !message_.data || !upload_.data || !reply_.ready()) return Fail("allocation_failed");
@@ -55,7 +59,22 @@ public:
         if (!tls_) return Fail("tls_init_failed");
         esp_transport_ssl_crt_bundle_attach(tls_, esp_crt_bundle_attach);
         esp_transport_ssl_set_common_name(tls_, kHost);
-        ws_ = esp_transport_ws_init(tls_);
+        writer_ = esp_transport_init();
+        if (!writer_) return Fail("writer_init_failed");
+        esp_transport_set_context_data(writer_, this);
+        esp_transport_set_func(writer_,
+            [](esp_transport_handle_t t, const char* host, int port, int timeout) { return esp_transport_connect(Self(t).tls_, host, port, timeout); },
+            [](esp_transport_handle_t t, char* data, int size, int timeout) { return esp_transport_read(Self(t).tls_, data, size, timeout); },
+            [](esp_transport_handle_t t, const char* data, int size, int timeout) { return Self(t).WriteComplete(data, size, timeout); },
+            [](esp_transport_handle_t t) { return esp_transport_close(Self(t).tls_); },
+            [](esp_transport_handle_t t, int timeout) { return esp_transport_poll_read(Self(t).tls_, timeout); },
+            // TLS writes below include their own socket readiness poll under
+            // WriteAll's absolute budget. A separate one-shot poll here would
+            // bypass that recovery path on a transient no-progress result.
+            [](esp_transport_handle_t t, int timeout) { auto& self = Self(t); return self.write_poisoned_ ? -1 : self.WriteTimeout(timeout) > 0 ? 1 : 0; },
+            nullptr);
+        esp_transport_set_parent_transport_func(writer_, [](esp_transport_handle_t t) { return Self(t).tls_; });
+        ws_ = esp_transport_ws_init(writer_);
         if (!ws_) return Fail("websocket_init_failed");
         esp_transport_ws_config_t config{};
         config.ws_path = path_.data; config.user_agent = "ESP32-Companion-Conversation/0.1";
@@ -75,6 +94,7 @@ public:
     }
     ~Conversation() {
         if (ws_) { esp_transport_close(ws_); esp_transport_destroy(ws_); }
+        if (writer_) esp_transport_destroy(writer_);
         if (tls_) esp_transport_destroy(tls_);
         mbedtls_platform_zeroize(scratch_, sizeof(scratch_));
         mbedtls_platform_zeroize(control_, sizeof(control_));
@@ -89,14 +109,23 @@ public:
         if (!input.data() || number == 0 || number > companion_followup::kMaxTurns) return Fail("invalid_input");
         reply_.Clear();
         auto& turn = result.turns[number - 1];
+        active_turn_ = number;
         CompanionSessionProbe::SetConversationStage(CompanionSessionProbe::VoiceStage::Connecting, number);
-        const auto upload_deadline = esp_timer_get_time() + 12000000;
+        const auto upload_started = esp_timer_get_time();
+        const auto upload_deadline = upload_started + 12000000;
         for (std::size_t offset = 0; offset < companion_question::kSamples; offset += companion_question::kChunkSamples) {
             if (!Alive()) return false;
             if (esp_timer_get_time() >= upload_deadline) return Fail("audio_upload_timeout");
             const auto count = std::min(companion_question::kChunkSamples, companion_question::kSamples - offset);
             const auto size = companion_question::EncodeFrame(input.data() + offset, count, upload_.data, upload_.size);
-            if (!size || !Send(1, upload_.data, size, 1000)) return Fail("audio_send_failed");
+            if (!size) return Fail("audio_encode_failed");
+            const auto send_started = esp_timer_get_time();
+            const bool sent = Send(1, upload_.data, size, 1000);
+            const auto send_ms = static_cast<unsigned>((esp_timer_get_time() - send_started) / 1000);
+            turn.max_send_ms = std::max(turn.max_send_ms, send_ms);
+            if (send_ms >= 250) ++turn.slow_sends;
+            turn.upload_ms = (esp_timer_get_time() - upload_started) / 1000;
+            if (!sent) return Alive() ? Fail("audio_send_failed") : false;
             mbedtls_platform_zeroize(upload_.data, upload_.size);
             turn.input_bytes += count * 2; ++turn.input_chunks;
             const auto next = esp_timer_get_time() + companion_question::kChunkMs * 1000;
@@ -108,8 +137,9 @@ public:
         std::memcpy(end, companion_question::kEnd, sizeof(end));
         const bool ended = Send(1, end, sizeof(end) - 1, 1000);
         mbedtls_platform_zeroize(end, sizeof(end)); input.Clear();
-        if (!ended) return Fail("audio_end_failed");
+        if (!ended) return Alive() ? Fail("audio_end_failed") : false;
         turn.input_ended = true;
+        turn.upload_ms = (esp_timer_get_time() - upload_started) / 1000;
         ESP_LOGI(kTag, "INPUT turn=%u bytes=%u chunks=%u stream_ended=1 input_cleared=1", number, turn.input_bytes, turn.input_chunks);
         const auto deadline = esp_timer_get_time() + 30000000;
         while (!reply_.state.turn_complete && esp_timer_get_time() < deadline) if (!Pump(100)) return false;
@@ -195,6 +225,10 @@ public:
     }
     bool Close() {
         if (!ws_ || closed_) return closed_;
+        // A partially written frame cannot be followed by a new close frame.
+        // Abort this stream; the next physical wake uses a fresh connection.
+        if (write_poisoned_) return Fail("write_stream_aborted");
+        closing_ = true;
         char close[] = {0x03, static_cast<char>(0xe8)};
         result.connection.close_sent = Send(8, close, sizeof(close), 1000);
         if (!result.connection.close_sent) return Fail("close_send_failed");
@@ -207,15 +241,102 @@ private:
     PrivateBuffer path_{companion_gemini::kPathCapacity}, message_{companion_voice::kMessageLimit + 1}, upload_{companion_question::kFrameCapacity};
     CompanionGeminiVoice::Reply reply_;
     companion_gemini::FrameTracker frames_{companion_voice::kMessageLimit};
-    esp_transport_handle_t tls_ = nullptr, ws_ = nullptr;
+    esp_transport_handle_t tls_ = nullptr, writer_ = nullptr, ws_ = nullptr;
     char scratch_[512]{}, control_[125]{};
     std::int64_t session_deadline_ = esp_timer_get_time() + companion_followup::kSessionLimitUs;
     std::size_t response_bytes_ = 0, close_drain_ = 0;
     unsigned response_messages_ = 0;
     bool closed_ = false;
+    unsigned active_turn_ = 0;
+    bool send_failure_reported_ = false;
+    bool fixture_ = false, write_poisoned_ = false, closing_ = false;
+    unsigned send_opcode_ = 0;
+    std::int64_t send_deadline_ = 0;
+    companion_transport::WriteResult last_write_{};
+#if COMPANION_QUESTION_FIXTURE
+    unsigned injected_step_ = 0;
+#endif
+    static Conversation& Self(esp_transport_handle_t t) { return *static_cast<Conversation*>(esp_transport_get_context_data(t)); }
+    int WriteTimeout(int requested) const {
+        if (!send_deadline_) return requested;
+        const auto left = (send_deadline_ - esp_timer_get_time() + 999) / 1000;
+        return static_cast<int>(std::max<int64_t>(0, std::min<int64_t>(requested, left)));
+    }
+    struct WriteIo {
+        Conversation& owner;
+        // Cancellation forbids more audio, but a healthy stream may still
+        // send its bounded close handshake before Wi-Fi is shut down.
+        bool Alive() { return owner.closing_ ? WifiManager::GetInstance().IsConnected() : owner.Alive(); }
+        std::int64_t Now() { return esp_timer_get_time(); }
+        bool Temporary(int value) const { return value == 0 || value == ESP_TLS_ERR_SSL_WANT_READ || value == ESP_TLS_ERR_SSL_WANT_WRITE; }
+        void Pause() { vTaskDelay(1); }
+        int Write(const char* data, unsigned size, int timeout) {
+#if COMPANION_QUESTION_FIXTURE
+            // Only public synthetic inputs exercise these controlled stalls.
+            // Real TLS bytes are still emitted exactly once, in order.
+            if (owner.fixture_ && owner.active_turn_ == 1 && owner.send_opcode_ == 1) {
+                if (owner.injected_step_ == 0 && size <= 14) {
+                    ++owner.injected_step_; ESP_LOGI(kTag, "WRITE_FAULT injected=header_wait"); return 0;
+                }
+                if (owner.injected_step_ == 1 && size <= 14) {
+                    const int sent = esp_transport_write(owner.tls_, data, std::min<unsigned>(size, 3), timeout);
+                    if (sent > 0) { ++owner.injected_step_; ESP_LOGI(kTag, "WRITE_FAULT injected=header_short"); }
+                    return sent;
+                }
+                if (owner.injected_step_ == 2 && size > 125) {
+                    const int sent = esp_transport_write(owner.tls_, data, 17, timeout);
+                    if (sent > 0) { ++owner.injected_step_; ESP_LOGI(kTag, "WRITE_FAULT injected=payload_short"); }
+                    return sent;
+                }
+                if (owner.injected_step_ == 3) {
+                    ++owner.injected_step_; ESP_LOGI(kTag, "WRITE_FAULT injected=payload_want_write"); return ESP_TLS_ERR_SSL_WANT_WRITE;
+                }
+            }
+#endif
+            return esp_transport_write(owner.tls_, data, size, timeout);
+        }
+    };
+    int WriteComplete(const char* data, int size, int timeout) {
+        if (write_poisoned_ || size < 0) return -1;
+        const auto deadline = std::min(session_deadline_, esp_timer_get_time() + static_cast<int64_t>(WriteTimeout(timeout)) * 1000);
+        WriteIo io{*this};
+        last_write_ = companion_transport::WriteAll(data, static_cast<unsigned>(size), deadline, io);
+        result.write_calls += last_write_.calls; result.write_waits += last_write_.waits; result.short_writes += last_write_.partials;
+        if (last_write_.ok()) return size;
+        write_poisoned_ = true;
+        return -1;
+    }
     bool Fail(const char* reason) { result.reason = reason; return false; }
     bool Send(unsigned opcode, char* data, std::size_t size, int timeout) {
-        return esp_transport_ws_send_raw(ws_, static_cast<ws_transport_opcodes_t>(opcode | 0x80), data, size, timeout) == static_cast<int>(size);
+        const auto started = esp_timer_get_time();
+        send_opcode_ = opcode; send_deadline_ = started + static_cast<int64_t>(timeout) * 1000;
+        last_write_ = {};
+        errno = 0;
+        const int sent = esp_transport_ws_send_raw(ws_, static_cast<ws_transport_opcodes_t>(opcode | 0x80), data, size, timeout);
+        const int system_error = errno;
+        send_deadline_ = 0;
+        if (sent == static_cast<int>(size)) return true;
+        write_poisoned_ = true;
+        if (last_write_.ok()) {
+            last_write_.status = sent == 0 ? companion_transport::WriteStatus::Timeout : companion_transport::WriteStatus::Failed;
+            last_write_.last_return = sent;
+        }
+        if (!send_failure_reported_) {
+            send_failure_reported_ = true;
+            int tls_error = 0, flags = 0;
+            const auto handle = esp_transport_get_error_handle(tls_);
+            const int tls_status = handle ? esp_tls_get_and_clear_last_error(handle, &tls_error, &flags) : 0;
+            const auto& turn = result.turns[active_turn_ ? active_turn_ - 1 : 0];
+            ESP_LOGW(kTag, "SEND_FAILURE turn=%u opcode=%u expected=%u returned=%d elapsed_ms=%u system_errno=%d socket_errno=%d tls_status=%d tls_error=%d tls_flags=%d input_bytes=%u input_chunks=%u wifi=%d rssi=%d internal_free=%u",
+                active_turn_, opcode, static_cast<unsigned>(size), sent, static_cast<unsigned>((esp_timer_get_time() - started) / 1000),
+                system_error, esp_transport_get_errno(tls_), tls_status, tls_error, flags, turn.input_bytes, turn.input_chunks,
+                WifiManager::GetInstance().IsConnected(), WifiManager::GetInstance().GetRssi(),
+                static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+            ESP_LOGW(kTag, "WRITE_FAILURE status=%s written=%u calls=%u waits=%u partials=%u last_return=%d",
+                companion_transport::WriteStatusName(last_write_.status), last_write_.written, last_write_.calls,
+                last_write_.waits, last_write_.partials, last_write_.last_return);
+        }
+        return false;
     }
     bool Pump(int timeout_ms, bool closing = false) {
         if (!closing && !Alive()) return false;
@@ -267,18 +388,27 @@ private:
 
 namespace CompanionConversation {
 Result Run(std::string_view temporary, companion_question::Pcm& first, bool fixture) {
-    Conversation conversation;
+    Conversation conversation(fixture);
     if (!conversation.Connect(temporary)) { first.Clear(); return conversation.result; }
     companion_question::Pcm* input = &first;
     std::unique_ptr<companion_question::Pcm> next;
     for (unsigned turn = 1; turn <= companion_followup::kMaxTurns; ++turn) {
-        if (!conversation.Turn(*input, turn)) { input->Clear(); conversation.Close(); return conversation.result; }
+        if (!conversation.Turn(*input, turn)) {
+            input->Clear();
+            const char* primary = conversation.result.reason;
+            if (!conversation.Close()) conversation.result.cleanup_reason = conversation.result.reason;
+            conversation.result.reason = primary;
+            return conversation.result;
+        }
         next = conversation.Followup(turn, fixture);
         if (!next) break;
         input = next.get();
     }
     const bool clean_end = !std::strcmp(conversation.result.reason, "quiet_timeout") || !std::strcmp(conversation.result.reason, "turn_limit");
+    const char* primary = conversation.result.reason;
     const bool closed = conversation.Close();
+    if (!closed) conversation.result.cleanup_reason = conversation.result.reason;
+    if (!clean_end) conversation.result.reason = primary;
     conversation.result.ok = clean_end && closed && conversation.result.completed_turns > 0;
     conversation.result.connection.ok = conversation.result.ok;
     return conversation.result;

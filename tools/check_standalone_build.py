@@ -49,7 +49,9 @@ def main():
     for path in (fw / "tests").glob("companion_*policy_test.cpp"):
         assert any(Path(c["file"]) == path for c in commands), path.name
         tests[path.name] = len(re.findall(r"static_assert\(", path.read_text(encoding="utf-8")))
-    assert sum(tests.values()) == 139, tests
+    assert sum(tests.values()) == 155, tests
+    assert b"WRITE_POLICY version=1 resume_partial=1 frame_timeout_ms=1000 question_retries=0" in image
+    assert (b"WRITE_FAULT injected=" in image) == args.fixture
     report = {"firmware_bytes": len(image), "firmware_sha256": hashlib.sha256(image).hexdigest(),
         "backup_bytes": len(raw), "backup_sha256": backup_sha, "backup_contains_verified_followup": True,
         "secure_configuration": True, "private_transport_logs_compiled_out": 5, "device_credential_absent_from_image": True,

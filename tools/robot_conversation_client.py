@@ -16,6 +16,29 @@ INPUT = r"CompanionConversation: INPUT turn=(\d+) bytes=(\d+) chunks=(\d+) strea
 VAD = r"CompanionConversation: VAD after_turn=(\d+) frames=(\d+) speech_frames=(\d+) longest=(\d+) accepted=([01]) mode=3"
 CAPTURE = (r"LocalCompanion: CAPTURE_COMPLETE request=(\d+) samples=(\d+) bytes=(\d+) duration_ms=(\d+) "
     r"sample_rate=16000 elapsed_ms=(\d+) rms=(\d+) peak=(\d+) clipped=(\d+)")
+UPLOAD_HEALTH = (r"CompanionConversation: UPLOAD_HEALTH turn=(\d+) bytes=(\d+) chunks=(\d+) ended=([01]) "
+    r"upload_ms=(\d+) max_send_ms=(\d+) slow_sends=(\d+)")
+SEND_FAILURE = (r"CompanionConversation: SEND_FAILURE turn=(\d+) opcode=(\d+) expected=(\d+) returned=(-?\d+) elapsed_ms=(\d+) "
+    r"system_errno=(-?\d+) socket_errno=(-?\d+) tls_status=(-?\d+) tls_error=(-?\d+) tls_flags=(-?\d+) "
+    r"input_bytes=(\d+) input_chunks=(\d+) wifi=([01]) rssi=(-?\d+) internal_free=(\d+)")
+WRITE_FAILURE = r"CompanionConversation: WRITE_FAILURE status=(complete|timeout|stopped|fatal|invalid) written=(\d+) calls=(\d+) waits=(\d+) partials=(\d+) last_return=(-?\d+)"
+WRITE_STATS = r"CompanionConversation: WRITE_STATS calls=(\d+) waits=(\d+) partials=(\d+) question_retries=0"
+
+
+def transport_observations(line):
+    for event, pattern, names in [
+            ("upload_health", UPLOAD_HEALTH, ["turn", "bytes", "chunks", "ended", "upload_ms", "max_send_ms", "slow_sends"]),
+            ("transport_failure", SEND_FAILURE, ["turn", "opcode", "expected", "returned", "elapsed_ms", "system_errno", "socket_errno",
+                "tls_status", "tls_error", "tls_flags", "input_bytes", "input_chunks", "wifi", "rssi", "internal_free"]),
+            ("write_stats", WRITE_STATS, ["calls", "waits", "partials"])]:
+        match = re.search(pattern, line)
+        if match: return event, dict(zip(names, map(int, match.groups())))
+    match = re.search(WRITE_FAILURE, line)
+    if match:
+        return "write_failure", {"status": match[1], **dict(zip(["written", "calls", "waits", "partials", "last_return"], map(int, match.groups()[1:])))}
+    match = re.search(r"CompanionConversation: CLEANUP reason=([a-z_]+)", line)
+    if match: return "transport_cleanup", {"reason": match[1]}
+    return None
 
 
 def conversation_metadata(text, expected_turns, *, fixture=False):
@@ -87,6 +110,8 @@ class ConversationDevice(CalibratorDevice):
             if self.held and "CALIBRATOR_RELEASE reason=lease_expired" in line:
                 self.held = False; raise CheckFailure("Test control expired. Reconnect before another conversation.")
             if not self.observing_capture: continue
+            observation = transport_observations(line)
+            if observation: self.callback(*observation)
             if "CloudWake: ARM_REJECTED" in line or "CloudWake: DISARMED reason=" in line:
                 self.wake_waiting = False
                 raise CheckFailure("The waiting arm ended or was rejected. Reconnect and arm when ready.")

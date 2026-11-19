@@ -252,6 +252,10 @@ class ConversationApp:
                 elif name == "microphone" and self.current: self.current["captures"].append(data); self.save()
                 elif name == "turn_result" and self.current: self.current["turn_results"].append(data); self.save()
                 elif name == "vad" and self.current: self.current["vad"].append(data); self.save()
+                elif name in {"upload_health", "transport_failure", "write_failure"} and self.current:
+                    self.current.setdefault(name, []).append(data); self.save()
+                elif name in {"write_stats", "transport_cleanup"} and self.current:
+                    self.current[name] = data; self.save()
                 elif name == "result" and self.current:
                     self.recording_started = None; self.busy = False; self.phase = "idle"
                     self.current.update(state="awaiting_confirmation", ended_at=utc_now(), measurement=data); self.save()

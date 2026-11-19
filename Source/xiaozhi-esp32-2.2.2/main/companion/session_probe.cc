@@ -430,6 +430,13 @@ bool Request(Kind kind, [[maybe_unused]] std::uint32_t capture_id = 0
 #if CONFIG_COMPANION_FOLLOWUP
         if (IsConversation(kind)) {
             const auto& c = result.conversation;
+            for (unsigned i = 0; i < c.turns.size(); ++i) {
+                const auto& t = c.turns[i];
+                if (t.upload_ms || t.input_chunks) ESP_LOGI("CompanionConversation", "UPLOAD_HEALTH turn=%u bytes=%u chunks=%u ended=%d upload_ms=%u max_send_ms=%u slow_sends=%u",
+                    i + 1, t.input_bytes, t.input_chunks, t.input_ended, t.upload_ms, t.max_send_ms, t.slow_sends);
+            }
+            ESP_LOGI("CompanionConversation", "CLEANUP reason=%s", c.cleanup_reason);
+            ESP_LOGI("CompanionConversation", "WRITE_STATS calls=%u waits=%u partials=%u question_retries=0", c.write_calls, c.write_waits, c.short_writes);
             ESP_LOGI("CompanionConversation", "RESULT ok=%d http=%d reason=%s upgrade_http=%d setup_ack=%d close_sent=%d close_ack=%d close_code=%u turns=%u followup_captures=%u quiet_discards=%u elapsed_ms=%lu cleanup=1 same_connection=1 fixture=%d",
                 result.ok, result.http_status, result.reason, c.connection.upgrade_http, c.connection.setup_ack,
                 c.connection.close_sent, c.connection.close_ack, c.connection.close_code, c.completed_turns,
@@ -575,6 +582,7 @@ void PrintStatus() {
 #endif
 #if CONFIG_COMPANION_FOLLOWUP
     ESP_LOGI("CompanionConversation", "FEATURE version=1 arm=c max_turns=2 followup_ms=4000 owner_lease_ms=10000 boot_armed=0");
+    ESP_LOGI("CompanionConversation", "WRITE_POLICY version=1 resume_partial=1 frame_timeout_ms=1000 question_retries=0");
 #endif
 #if CONFIG_COMPANION_STANDALONE
     LastConversation last;
