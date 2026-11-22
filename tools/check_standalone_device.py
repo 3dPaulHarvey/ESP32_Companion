@@ -143,7 +143,10 @@ def normal_check(device, checks):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--fixture", action="store_true"); args = parser.parse_args()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--fixture", action="store_true")
+    parser.add_argument("--report", type=Path, help="Save results separately from earlier hardware evidence")
+    args = parser.parse_args()
     device = GuardedDevice(); checks = []; failure = None; stage = "identity"
     try:
         device.connection.open()
@@ -162,7 +165,9 @@ def main():
         report = {"recorded_at": datetime.now(timezone.utc).isoformat(), "device_mac": EXPECTED_MAC, "fixture": args.fixture,
             "checks": checks, "failure": failure, "stage": stage, "live_microphone_audio_uploaded": False, "raw_audio_saved": False}
         name = "esp32-standalone-" + ("fixture-" if args.fixture else "") + "hardware-qa.json"
-        (Path(__file__).resolve().parent.parent / "logs" / name).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        report_path = args.report or Path(__file__).resolve().parent.parent / "logs" / name
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report))
     if failure: raise SystemExit(1)
 

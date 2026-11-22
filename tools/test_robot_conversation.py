@@ -7,7 +7,7 @@ import tkinter as tk
 import unittest
 from unittest import mock
 
-from robot_conversation_client import ConversationClient, ConversationDevice, conversation_metadata, CheckFailure, TrialCancelled
+from robot_conversation_client import ConversationClient, ConversationDevice, conversation_metadata, transport_observations, CheckFailure, TrialCancelled
 from robot_conversation_test import ConversationApp
 from test_robot_wake import PHYSICAL, CAPTURE_TRACE, ARMED_TRACE, WakeSerial
 
@@ -47,6 +47,35 @@ def client_with(turns=2, callback=lambda *args: None):
 
 
 class ConversationChecks(unittest.TestCase):
+    def test_performance_timing_is_emitted_before_final_result_and_retained(self):
+        events = []; client = client_with(callback=lambda name, data: events.append((name, data))); d = client.device
+        trace = ("CompanionSession: FETCH elapsed_ms=2250 ok=1 http=200 reason=verified\n"
+            "CompanionConversation: CONNECTION_TIMING upgrade_ms=1100 ready_ms=1250\n"
+            "CompanionConversation: PLAYBACK_BEGIN turn=1 since_upload_ms=5300 generation_complete=1 turn_complete=0 mono_us=12345678901\n"
+            "CompanionConversation: TIMING turn=1 upload_ms=4050 first_audio_ms=4500 generation_complete_ms=5300 turn_complete_ms=7300 playback_start_ms=5300\n")
+        d.connection.chunks = [trace[:130].encode(), trace[130:].encode()]; d.observing_capture = True
+        d.read(); d.read()
+        observed = dict(events)
+        self.assertEqual(observed["session_fetch"], {"elapsed_ms": 2250, "ok": 1, "http": 200, "reason": "verified"})
+        self.assertEqual(observed["connection_timing"], {"upgrade_ms": 1100, "ready_ms": 1250})
+        self.assertEqual(observed["playback_begin"], {"turn": 1, "since_upload_ms": 5300,
+            "generation_complete": 1, "turn_complete": 0, "mono_us": 12345678901})
+        self.assertEqual(observed["turn_timing"], {"turn": 1, "upload_ms": 4050, "first_audio_ms": 4500,
+            "generation_complete_ms": 5300, "turn_complete_ms": 7300, "playback_start_ms": 5300})
+        self.assertNotIn("result", observed)
+        metadata = conversation_metadata(network_trace() + trace, 2)
+        self.assertEqual(metadata["connection_timing"], observed["connection_timing"])
+        for event in ("turn_timing", "playback_begin", "session_fetch"):
+            self.assertEqual(metadata[event], [observed[event]])
+        old_metadata = conversation_metadata(network_trace(), 2)
+        for event in observed: self.assertNotIn(event, old_metadata)
+
+    def test_session_fetch_accepts_kind_format_without_requiring_new_timing_logs(self):
+        self.assertEqual(transport_observations("CompanionSession: FETCH kind=conversation_fixture elapsed_ms=1750 http=200 reason=verified"),
+            ("session_fetch", {"kind": "conversation_fixture", "elapsed_ms": 1750, "http": 200, "reason": "verified"}))
+        self.assertIsNone(transport_observations("CompanionSession: TIME reused=1 age_ms=5000 elapsed_ms=0"))
+        self.assertEqual(conversation_metadata(network_trace(), 2)["completed_turns"], 2)
+
     def test_partial_upload_transport_codes_are_emitted_before_final_result(self):
         events = []; client = client_with(callback=lambda name, data: events.append((name, data))); d = client.device
         trace = ("CompanionConversation: SEND_FAILURE turn=1 opcode=1 expected=1784 returned=-1 elapsed_ms=1001 system_errno=11 socket_errno=0 tls_status=0 tls_error=-26752 tls_flags=0 input_bytes=38400 input_chunks=30 wifi=1 rssi=-57 internal_free=86544\n"

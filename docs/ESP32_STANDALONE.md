@@ -1,8 +1,38 @@
 # Standalone wake operation
 
+## Streaming upgrade, 2026-11-19
+
+Version 0.3.0 replaces the normal autonomous question path with live microphone and speaker streaming. The current upload and validation result is recorded in [Response performance](PERFORMANCE.md). The older checkpoints and fixed-capture test procedure below remain historical/diagnostic evidence.
+
+**Uploaded to COM26:** normal v0.3.0, 1,954,224 bytes, SHA256 `4b4910416677b6aa3aed9909c202992150db24220ad2778a70dc453853989a2d`. Flash hashes, preflash checks and all eight normal-image startup/control checks passed; NVS was preserved. The synthetic fixture image was replaced by the normal wake-enabled image.
+
+**Human voice confirmation:** the user heard correct four/twelve replies and reports that continued conversation is fast and connections work reliably. The observer logged two complete variable-length voice turns with zero clipping/underruns, then a third-turn write timeout and a later unclassified observer access interruption. The third capture was intentional continued talking, not a quiet-input false positive. This functional confirmation is not an uninterrupted reliability pass; the incident and timing remain in `logs/live-upgrade-human-review.json` and `logs/live-upgrade-room-test.json`.
+
+Normal operation:
+
+1. At READY, say **Hi, E-S-P** and wait for **ASK NOW**. The microphone warms up for 200 ms while authenticated connection setup starts in parallel.
+2. Ask naturally. Local VAD accepts sustained speech, retains 320 ms of leading audio, and streams the question. Recording ends after approximately 600 ms without detected speech. Four seconds is now a wait for speech to begin; the maximum total capture is ten seconds.
+3. The screen changes to **CONNECTING** without an end cue or 800 ms cue wait. Incoming reply audio starts playing after a 120 ms buffer, before the complete answer has arrived when possible.
+4. After the answer, ASK NOW opens for an optional follow-up. Quiet input is discarded locally, with zero question audio uploaded.
+5. READY after quiet retains the connection for the remainder of a 30-second idle window measured from the preceding answer. A new wake during that window reuses the connection and conversation context. The connection closes after idle, eight answers, or two minutes total. A later wake creates a fresh session.
+
+Wi-Fi modem power saving is disabled when the saved station connects. Cloudflare, the Gemini model, the deployed token policy and the calibrated microphone/wake gains are unchanged. There is no barge-in or acoustic echo cancellation: microphone recording finishes before speaker playback starts. Disconnects and ambiguous uploads never trigger automatic question replay.
+
+Use the read-only live observer for this path:
+
+```powershell
+python tools/robot_live_observer.py --seconds 180 --report "$env:LOCALAPPDATA/ESP32_Companion/qa/live-voice-trial.json"
+```
+
+Choose a new report filename per trial. This tool verifies the device identity and sends only status queries. It records numeric events, not room audio, transcripts or raw serial output. Active reports should use LocalAppData: one atomic report replacement in Dropbox-backed `logs/` returned a permission error during this upgrade. The observer now retries temporary replacement locks; the sync process responsible was not confirmed.
+
+The calibrator and explicit old diagnostic controls retain their fixed four-second captures. The older standalone three-trial app checks a fixed two-answer protocol and does not validate the new variable-length live path. A diagnostic pause while the live connection is warm closes it before transferring control.
+
+**Historical clean-build upload on 2026-11-19:** COM26 previously booted `esp32_companion` version 0.2.0 from the 1,935,552-byte renamed clean build. Its running ELF identity matched. All eight normal-image device/control checks passed, including saved Wi-Fi, local microphone capture with zero clipping, diagnostic handoff and wake re-arming. [Earlier upload evidence](TEST_LOG.md).
+
 **Phase 5c first gate passed on 2026-11-18:** autonomous voice conversations and separate-USB-supply cold boot/re-wake are verified. The `standalone` profile connects saved Wi-Fi at boot. When READY, **Hi, E-S-P** starts the bounded two-answer conversation without a Desktop arm, open serial port or PC heartbeat. A subsequent [upload recovery update](UPLOAD_RECOVERY.md) adds bounded partial/temporary-write handling and passes ten fault-injected synthetic conversations. The original saved run contains one upload failure followed by fresh-wake recovery; its exact native cause was not recorded. The preceding [armed follow-up checkpoint](ESP32_FOLLOWUP.md) remains verified separately. Actual-voice stress, prolonged idle, access-point outage, longer conversations and interruption remain later gates.
 
-## Expected robot behavior
+## Historical fixed-capture behavior
 
 1. Power the robot. Animated eyes continue while **WIFI...** changes to **READY** after saved Wi-Fi connects. Startup and reconnection alone send no Gemini request.
 2. Say **Hi, E-S-P** from 1-2 feet away. Wait for the listening eyes and **ASK NOW** before asking a short question. ASK NOW begins after the microphone warmup; the recording window is four seconds and ends with the local cue.
@@ -16,7 +46,7 @@ If Wi-Fi is unavailable, normal local wake/capture/cue behavior remains, followe
 
 ## Self-paced test
 
-Open **Robot Standalone Test** on the Desktop or **Open Robot Standalone Test.cmd** in the project. Close other robot apps/serial monitors. Click **Connect robot** and wait for Ready when you are. This app only queries status: it cannot arm, pause, cancel, send a heartbeat or change Wi-Fi. Connection does not probe Gemini.
+Double-click **Open Robot Standalone Test.cmd** in the project folder. Close other robot apps/serial monitors. Click **Connect robot** and wait for Ready when you are. This app only queries status: it cannot arm, pause, cancel, send a heartbeat or change Wi-Fi. Connection does not probe Gemini.
 
 Run one quiet trial followed by two full trials:
 

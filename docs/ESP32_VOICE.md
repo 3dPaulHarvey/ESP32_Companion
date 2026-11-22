@@ -38,7 +38,7 @@ python .\tools\check_esp32_voice.py --repeats 2 --network-drop
 
 This plays two greetings, then deliberately stops **device-side Wi-Fi** while another Gemini connection opens. That expected failure must release the job, restore READY/wake, and permit an offline local capture/cue cycle. It does not toggle the access point. The requests share the existing Worker admission limit.
 
-Build output is isolated in `build-voice/` and `sdkconfig.voice.generated`. The flash guard verifies COM26 / MAC `44:bd:8d:ec:38:e0`; normal flashing retains NVS. The previous `-Profile gemini`, `-Profile session` and local diagnostics profiles remain available. No new secret, cloud deployment or dependency is required.
+Build output is isolated in `%LOCALAPPDATA%/ESP32_Companion/build-voice/`, including its generated `sdkconfig`. The flash guard verifies COM26 / MAC `44:bd:8d:ec:38:e0`; normal flashing retains NVS. The previous `-Profile gemini`, `-Profile session` and local diagnostics profiles remain available. No new secret, cloud deployment or dependency is required.
 
 ## Data and playback
 

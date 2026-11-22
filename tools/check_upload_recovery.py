@@ -15,7 +15,9 @@ parser.add_argument('--require-recovery', action='store_true')
 args = parser.parse_args(); assert re.fullmatch(r'[a-z0-9-]+', args.name) and 1 <= args.cycles <= 12
 out = root / 'logs' / (args.name + '.json'); assert not out.exists(), 'Preserve previous run evidence.'
 build = Path(__import__('os').environ['LOCALAPPDATA']) / 'ESP32_Companion/build-standalone'
-image = (build / 'xiaozhi.bin').read_bytes()
+metadata = json.loads((build / 'project_description.json').read_text(encoding='utf-8'))
+assert metadata['project_name'] == 'esp32_companion' and metadata['app_bin'] == 'esp32_companion.bin', 'Renamed companion build required.'
+image = (build / metadata['app_bin']).read_bytes()
 report = {'created_at': utc_now(), 'firmware_sha256': hashlib.sha256(image).hexdigest(), 'status': 'in_progress',
     'live_microphone_capture': False, 'live_audio_uploaded': False, 'raw_audio_saved': False, 'transcript_saved': False,
     'cycles_requested': args.cycles, 'cycles': []}

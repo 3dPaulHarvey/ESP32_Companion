@@ -1,5 +1,7 @@
 # Test log
 
+Current firmware source is `Source/esp32-companion/`; new build artifacts use `esp32_companion` names. Earlier boot identities, model names, hashes, and archive paths below are historical observations and remain unchanged.
+
 ## 2026-11-09 — Step 1 baseline
 
 Development unit: COM26. Source tag: `supplied-source-baseline`; changes on `work/step-1-baseline`.
@@ -778,3 +780,78 @@ Final installed normal app: **2,599,264 bytes**, SHA256 `091c6f19f39c2faa4cabaf6
 Ignored evidence: `esp32-upload-baseline-fixtures.json`, `esp32-upload-recovery-ten-cycles.json`, `esp32-upload-guarded-shutdown.json`, `esp32-upload-link-loss.json`, original/repeated driver-stop reports, `robot-upload-recovery-host-tests.log`, `esp32-upload-normal-hardware-qa.json`, build/flash logs and derived `esp32-upload-investigation.json` under `logs/`. The original user session retains SHA256 `fab8d45e76d2c0e5e94bc67f510100264093855576f78b498943ddb847f77340`. Public synthetic audio alone was uploaded during investigation; one final local count/gain capture was not uploaded.
 
 **Send-path correction and controlled recovery verification passed.** This establishes bounded write recovery and resource cleanup, while the old event's exact native trigger remains unknowable from its saved record. Ten actual-voice cycles, prolonged idle and physical AP outage remain later gates. [Implementation, repeatable developer test and evidence](UPLOAD_RECOVERY.md).
+
+
+## 2026-11-19 - Platform specialization, source/build verification
+
+Removed the unused original cloud runtime and alternate hardware/features. [Scope, retained behavior and measurements](PLATFORM_SPECIALIZATION.md).
+
+| Check | Observed result |
+|---|---|
+| Offline host/tool tests | PASS: 84 tests, including calibrator UI workflow |
+| Existing C++ suites | PASS: nine policy suites and two local state/capture runtime suites |
+| ESP-IDF builds | PASS: normal standalone, public synthetic fixture, reduced diagnostics |
+| Preflash checks | PASS: 155 compiled assertions, secure TLS, private transport logging excluded, actual device credential absent, NVS/recovery preserved, correct fixture inclusion/exclusion |
+| Asset format | PASS: independent outer/inner format decoding and exact source model bytes; 291,288-byte deterministic wake-only image |
+| Final build state | PASS: rebuilt normal image after fixture build; identical SHA256 and fixture/fault paths absent |
+| Removed upstream services | PASS: original endpoint/protocol markers absent from normal image |
+| Device flash / new physical checks | NOT PERFORMED: device remains on its previously verified firmware |
+
+Normal app: **1,961,520 bytes**, SHA256 `fd48017dfcb29fbfeb50cd82d9eed23230000e5430924ec552c0afd9b85f1819`, 24.5% smaller than the prior installed app. Main firmware C/C++/headers fall from 25,923 to 5,655 lines. Dependency resolution drops from 64 to 9 packages including IDF. Existing wiring, capture/wake shifts and transport write policy are preserved in source; OLED status font changes to built-in Montserrat 14.
+
+Builds are under `%LOCALAPPDATA%/ESP32_Companion/specialization/`. Separate evidence is under `logs/platform-specialization-*`; earlier reviewed result files and recovery images were not overwritten. Firmware is built for review, with physical smoke testing still pending.
+
+
+## 2026-11-19 - Clean-slate build and disk cleanup
+
+Deleted eight obsolete in-source build folders, all earlier external build trees, generated source sdkconfig files, npm download cache, the downloaded Node ZIP, old test executables and disposable Python/Wrangler output. Deletion was limited to an inventoried file list followed by verified empty directories. Source, pinned dependencies, active tools, credentials and real test evidence were retained.
+
+Removed **4,293,898,212 bytes**: **2,790,624,422** from the workspace and **1,503,273,790** from the previous external build roots. The workspace now measures approximately **1.20 GB**, down from **3.98 GB**. One fresh external build occupies **205,552,220 bytes**; net reduction including that rebuilt tree is approximately **4.09 GB**.
+
+The default build is now `%LOCALAPPDATA%/ESP32_Companion/build-standalone/`, including its own sdkconfig. Both VS Code build settings point outside Dropbox. Preflash validation reads binary/config paths from the selected build metadata and checks that they belong to that build. Versioned defaults plus dependencies.lock recreate the build without old generated sdkconfig or compiler artifacts.
+
+Fresh configure compared all 1,746 configuration keys against the prior specialized build. Only five removed features switched off: LVGL image fonts, PNG decoding, snapshots, UART ISR in IRAM and its selected VFS RAM callbacks. Flash/QIO, partitions, PSRAM, TLS, audio/wake, capture and transport settings match. ESP-IDF's DIO image header for QIO remains normal; no flash-mode change was made.
+
+**PASS:** complete `-NoCache` build (ccache disabled and no ccache commands); normal-image preflight with all 155 policy assertions, secure TLS/private logging, credential/fixture exclusion and preserved NVS/recovery; all nine native C++ policy suites plus both capture/state runtime suites. Normal app is **1,935,552 bytes**, SHA256 `0197cdf703249aa347046f7a0ff2086f67a4c1f6560b72f145f34f9530449ed0`, with 37% application-partition headroom.
+
+All **1,146 recovery/reference files** were checked byte-for-byte against pre-cleanup hashes. The original full-flash backup and the last physically verified firmware with its ELF/symbols and configuration remain intact. No device flash or cloud deployment was performed. Evidence: `logs/clean-slate-deletion-plan.json`, `clean-slate-config-diff.json`, `clean-slate-fresh-build.log`, `clean-slate-fresh-preflash.json`, `clean-slate-summary.json` and the retained-file hash inventory.
+
+
+## 2026-11-19 - Pruned firmware uploaded to COM26
+
+Flashed the clean standalone app **1,935,552 bytes**, SHA256 `0197cdf703249aa347046f7a0ff2086f67a4c1f6560b72f145f34f9530449ed0`, and the 291,288-byte English wake assets. COM26 MAC `44:bd:8d:ec:38:e0` matched before writing. All five write hashes verified, NVS was not written, and the exact app hash remained unchanged after flashing.
+
+**All eight normal-image device checks pass:** saved Wi-Fi and wake readiness with zero provider requests at boot; fixture exclusion; diagnostic pause/renewal and Wi-Fi preference restoration; lost-USB lease recovery; explicit offline/resume; a local 64,000-sample calibrated capture with zero clipping; calibration closure restoring autonomy; and read-only observer connect/close with no control commands. Automated checks uploaded no live microphone audio and saved no raw audio. The robot was left online, idle and wake armed.
+
+The visible **Robot Standalone Test** was opened for the user's real wake/eyes/spoken-answer check. Human voice/display confirmation remains pending; automated control checks alone do not establish a correct cloud answer or audible quality on this image.
+
+Evidence is under `logs/pruned-device-test-2026-11-19/` (preflash, flash log, hardware QA and live-session pointer). The compact exact-image recovery archive is `recovery/2026-11-19-pruned-firmware/pruned-device-test-2026-11-19/`, with BIN/ELF, generated configuration, flash inputs, assets, small source snapshot and SHA256 manifest. Compiler objects/cache trees were not archived. Previous recovery files and reviewed test results remain unchanged.
+
+
+## 2026-11-19 - ESP32 Companion project identity
+
+Renamed the active firmware directory to **`Source/esp32-companion/`** and the CMake project to **`esp32_companion`**. Current outputs are `esp32_companion.bin`, `esp32_companion.elf` and `esp32_companion.map`. Updated build scripts, policy runner, upload/preflash tools, VS Code paths and current documentation. Recovery checks obtain the archived application filename from its saved metadata, so immutable backups need no renaming. Removed a redundant disabled vendor wake-model entry; the effective generated configuration is identical across all 1,746 keys.
+
+**PASS:** cold build with compiler cache disabled; preflash/security/recovery checks and 155 compiled assertions; nine native C++ policy suites plus two local capture/state suites. The normal image remains **1,935,552 bytes**, SHA256 `7c2419ace6a727b315c0baf0255c6d7bec5248465ab3931a4491faa91880a0ce`. Wake assets match the previously flashed bytes exactly. Active implementation/tool/IDE scans and the compiled firmware image contain no original project-name text. Upstream attribution, third-party interfaces, historical observations and immutable archives preserve their recorded names.
+
+All **84 host tests pass** in ten fresh module processes. An initial combined discovery run crashed during Tkinter cleanup; isolated runs show no Tk finalizer errors, and the GUI app/test sources are unchanged by this rename. Cross-module Tk interpreter/garbage-collection lifetime contamination is a likely explanation, but the exact native cause is unproven. This does not indicate a reproduced rename regression. The serial-only local-cycle CLI was not executed as a host unit test.
+
+The current default build folder was regenerated rather than keeping an obsolete duplicate. No device flash occurred during this naming change; COM26 retains the image from the preceding upload/test entry. The exact previously flashed archive was verified unchanged by its SHA256 manifest. New verification evidence is under `logs/project-rename-2026-11-19/`.
+
+
+## 2026-11-19 - Requested clean rebuild of ESP32 Companion
+
+Removed the current generated build tree completely, then rebuilt `Source/esp32-companion/` as `esp32_companion` from checked-in defaults with `-NoCache`. The generated sdkconfig is new; all 1,746 effective settings match the preceding renamed build. Compiler commands and CMake cache confirm ccache was disabled. One current build remains under `%LOCALAPPDATA%/ESP32_Companion/build-standalone/`; no build tree was created inside Dropbox.
+
+**PASS:** full standalone build; nine native C++ policy suites and both local runtime suites; normal-image preflash/security/recovery checks with all 155 compiled policy assertions. The normal app is **1,935,552 bytes**, SHA256 `9da0248507080060586e1a00d7e224b6dd60b59ce5f297cbcd1efbb01853c0d0`, with 37% application-partition headroom. Wake assets match the preceding build exactly. The app contains no original project-name text, fixture input or actual device credential.
+
+Current artifacts include `esp32_companion.bin`, `.elf`, `.map`, generated wake assets, bootloader, partition table, OTA metadata and flash arguments. A hash inventory and validation results are saved under `logs/companion-clean-build-2026-11-19/`. Recovery archives were verified intact by the independent review. No device access, flash or cloud deployment occurred during this rebuild.
+
+
+## 2026-11-19 - Renamed clean build uploaded to COM26
+
+Uploaded **`esp32_companion.bin`**, version **0.2.0**, **1,935,552 bytes**, SHA256 `9da0248507080060586e1a00d7e224b6dd60b59ce5f297cbcd1efbb01853c0d0`, plus its matching bootloader, partition table, OTA metadata and English wake assets. COM26 MAC `44:bd:8d:ec:38:e0` matched; all five write hashes verified. NVS was excluded, preserving saved Wi-Fi/device credentials. No recompilation or artifact hash change occurred during flash.
+
+The robot's boot log identifies **`esp32_companion` / 0.2.0** and ELF SHA prefix `5b5afd8cb`, matching the uploaded ELF. **All eight normal-image device checks pass:** boot Wi-Fi/wake readiness without provider requests, fixture exclusion, diagnostic lease renewal/restoration, lost-USB recovery, explicit offline/resume, 64,000-sample local microphone capture at shift15 with zero clipping, calibrator handoff cleanup, and read-only observer connection. Tests saved no raw audio and uploaded no live microphone audio. The robot was left online, idle and wake armed with serial closed.
+
+Evidence: `logs/companion-upload-2026-11-19/`. Compact exact-image recovery: `recovery/2026-11-19-esp32-companion/companion-upload-2026-11-19/`, containing the renamed binaries, symbols, configuration, flash inputs, small source snapshot and refreshed SHA256 manifest. Previous recovery archives remain unchanged. Correct spoken answers and visible/audible quality on this exact image still require the user's live confirmation.

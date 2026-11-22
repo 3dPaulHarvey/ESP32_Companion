@@ -4,7 +4,7 @@
 
 ## Run the self-paced test
 
-Open **Robot Follow-up Conversation Test** on the Desktop, or **Open Robot Conversation Test.cmd** in the project. Close other robot apps and serial monitors, connect COM26, and click **Connect robot**. Wait for **Ready when you are**. Connection alone starts no question.
+Double-click **Open Robot Conversation Test.cmd** in the project folder. Close other robot apps and serial monitors, connect COM26, and click **Connect robot**. Wait for **Ready when you are**. Connection alone starts no question.
 
 Run these three trials in a quiet room, 1-2 feet from the robot:
 
@@ -49,7 +49,7 @@ $taskBuildRoot = Join-Path $env:LOCALAPPDATA 'ESP32_Companion'
 python -m unittest discover -s tools -p 'test_*.py'
 ```
 
-Generated artifacts use `<root>/build-followup/`; configuration is `sdkconfig.followup.generated` in the firmware project. Use the same `-BuildRoot` for build and flash. The wrapper verifies the development MAC and preserves NVS. Normal commands disable embedded test audio.
+Generated artifacts and configuration use `<root>/build-followup/`, with the generated configuration at `build-followup/sdkconfig`. The default root is `%LOCALAPPDATA%/ESP32_Companion`, outside Dropbox. Use the same `-BuildRoot` for build and flash. The wrapper verifies the development MAC and preserves NVS. Normal commands disable embedded test audio.
 
 Developer-only synthetic regression:
 

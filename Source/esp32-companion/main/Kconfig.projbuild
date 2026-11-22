@@ -1,0 +1,88 @@
+menu "ESP32 Companion"
+
+config COMPANION_HARDWARE_DIAGNOSTICS
+    bool
+    default y
+    help
+        Shared runtime for this fixed board, its standalone conversation loop
+        and the local USB diagnostic tools. The standalone profile starts saved
+        Wi-Fi automatically; local diagnostic profiles boot offline.
+
+config COMPANION_SESSION_PROBE
+    bool "Companion manual authenticated session check"
+    depends on COMPANION_HARDWARE_DIAGNOSTICS
+    default n
+    help
+        Add a manual USB serial session check to local diagnostics. The device
+        credential is provisioned privately over USB into NVS. Wi-Fi stays off
+        at boot and wake words remain local. No voice or audio is uploaded.
+
+config COMPANION_GEMINI_SETUP_PROBE
+    bool "Companion direct Gemini setup check"
+    depends on COMPANION_SESSION_PROBE
+    default n
+    help
+        Add a manual secure WebSocket setup/close check using a fresh temporary
+        session credential. No question or microphone audio is sent.
+
+config COMPANION_GEMINI_VOICE_PROBE
+    bool "Companion manual Gemini speaker check"
+    depends on COMPANION_GEMINI_SETUP_PROBE
+    default n
+    help
+        Receive one fixed greeting, close the cloud connection, then play
+        bounded 24 kHz PCM through the existing output task. No audio upload.
+
+config COMPANION_MICROPHONE_PREP
+    bool "Companion local microphone preparation"
+    depends on COMPANION_GEMINI_VOICE_PROBE
+    default n
+    help
+        Use four-second local captures and measure raw I2S headroom before
+        conversion. Wake-word gain is unchanged; microphone audio is not uploaded.
+
+config COMPANION_MICROPHONE_SHIFT
+    int "Local capture PCM right shift"
+    depends on COMPANION_MICROPHONE_PREP
+    range 12 18
+    default 15
+    help
+        Fixed capture-only conversion gain. Each extra bit adds approximately
+        6 dB of digital headroom. Existing wake-word conversion remains at 12.
+
+config COMPANION_GEMINI_QUESTION_PROBE
+    bool "Companion manual microphone question"
+    depends on COMPANION_MICROPHONE_PREP
+    default n
+    help
+        Add an explicit USB-started four-second microphone question, followed
+        by a bounded Gemini audio reply. Wake and calibration remain local.
+
+config COMPANION_CLOUD_WAKE
+    bool "Companion explicitly armed wake question"
+    depends on COMPANION_GEMINI_QUESTION_PROBE
+    default n
+    help
+        Permit one wake-triggered microphone question after an explicit USB
+        arm command. Boot and ordinary wake remain local. Arming expires on
+        disconnect or timeout, and is consumed by one recognized wake.
+
+config COMPANION_FOLLOWUP
+    bool "Companion bounded two-turn conversation"
+    depends on COMPANION_CLOUD_WAKE
+    default n
+    help
+        Add an explicit conversation arm. Keep one Gemini connection across
+        two replies, checking a local four-second follow-up capture after
+        each reply. Quiet input is discarded locally. Boot stays unarmed.
+
+config COMPANION_STANDALONE
+    bool "Companion autonomous wake conversations"
+    depends on COMPANION_FOLLOWUP
+    default n
+    help
+        Start saved Wi-Fi at boot and allow a local wake to start the bounded
+        two-answer conversation without USB arming or a PC heartbeat. Keep
+        local wake available offline. Diagnostic clients can pause automation.
+
+endmenu

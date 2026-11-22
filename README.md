@@ -1,63 +1,48 @@
 # ESP32 Companion
 
-Step 1 establishes a recoverable build of the supplied TechTalkies Xiaozhi firmware on the development XIAO ESP32-S3 at **COM26**.
+A standalone voice companion for one fixed XIAO ESP32-S3: local **Hi, E-S-P** wake detection, a 16 kHz I2S microphone, a 24 kHz speaker, and an animated SSD1306 OLED face. Saved Wi-Fi starts at boot. Our Cloudflare Worker authenticates the device and issues temporary Gemini credentials; the ESP32 exchanges bounded PCM directly with Gemini.
 
-**First smoke test passed on 2026-11-09:** source built and flashed successfully; serial startup, eyes, startup sound, and English wake response verified. Original flash and both build variants are saved locally for recovery.
+The normal workflow connects while recording, streams accepted microphone audio and reply PCM, and ends a question after 600 ms of detected silence. It waits up to four seconds for speech, caps capture at ten seconds, and keeps a short connection ready between nearby wakes. Sessions permit eight answers, 30 seconds idle or two minutes total. Quiet is discarded locally. It works from a separate USB power supply without a PC arm or heartbeat. Capture shift remains 15; wake conversion remains 12.
 
-**Local diagnostic mode is available:** independent face/tone/microphone-level tests and repeated English wake acknowledgment, with Wi-Fi off at boot. [Diagnostic commands and test procedure](docs/DIAGNOSTICS.md).
-
-**Phase 2b adds bounded local microphone capture:** wake, two seconds of PCM, an end cue, and idle recovery. Capture and cancellation passed automated checks; three voice-triggered captures completed in serial. The user confirms the updated physical behavior works in a follow-up test on 2026-11-17. Microphone headroom calibration remains open before voice streaming. [Current behavior and test procedure](docs/LOCAL_CAPTURE.md).
-
-- Working ESP-IDF project: `Source/xiaozhi-esp32-2.2.2/`.
-- Supplied reference: `_Reference_Code/` (untouched and excluded from Git).
-- Toolchain: installed **ESP-IDF v5.5.2**, matching this source's minimum requirement.
-- Hardware: probed **8 MB flash / 8 MB embedded PSRAM**, SSD1306 128x64 profile.
-- Development wake phrase: **“Hi, ESP”** (say “Hi, E-S-P”). The first Chinese-model build is preserved at tag `step-1-baseline-flashed`.
-- [Build, flash and recovery](docs/BUILD_AND_FLASH.md)
-- [Hardware and wiring](docs/HARDWARE.md)
-- [Observed test results](docs/TEST_LOG.md)
-- [Source provenance](docs/BASELINE.md)
-
-Open `ESP32_Companion.code-workspace` in VS Code. Select the **Firmware** folder for ESP-IDF extension commands. From the repository root:
+**Platform specialization, 2026-11-19:** the upstream application, activation/OTA, MQTT, MCP and generic hardware paths have been removed. Standalone is now the default build. Local diagnostics, calibration, recovery checks and synthetic test profiles remain because they support this implementation. [Changes and validation](docs/PLATFORM_SPECIALIZATION.md).
 
 ```powershell
 .\tools\idf.ps1 -Action build
 ```
 
-Build/flash/monitor tasks are also available through **Terminal > Run Task**. Read the recovery procedure before the first flash.
+Generated builds and their sdkconfig default to `%LOCALAPPDATA%/ESP32_Companion/build-standalone/`, outside Dropbox in persistent local storage. Firmware source is in `Source/esp32-companion/`; new builds produce `esp32_companion.bin`, `esp32_companion.elf`, and `esp32_companion.map`. [Build, flash and recovery](docs/BUILD_AND_FLASH.md).
 
-To build or flash local diagnostics, add `-Profile diagnostics` to the wrapper command. The default profile remains `baseline`.
+- [Hardware and wiring](docs/HARDWARE.md)
+- [Standalone behavior and physical test procedure](docs/ESP32_STANDALONE.md)
+- [Response performance audit and optimization plan](docs/PERFORMANCE.md)
+- [Microphone calibrator](docs/MICROPHONE_CALIBRATOR.md)
+- [Upload recovery and its observed limits](docs/UPLOAD_RECOVERY.md)
+- [Cloudflare Worker](docs/CLOUD_WORKER.md) and [device authentication](docs/DEVICE_AUTH.md)
+- [Cloudflare and Gemini free-tier usage](docs/CLOUD_USAGE.md)
+- [Test history](docs/TEST_LOG.md) and [source provenance](docs/BASELINE.md)
 
-**Phase 3a health endpoint is verified locally and online:** runtime tests, packaging and hosted HTTPS success/error checks pass. [Run the Worker and view the next steps](docs/CLOUD_WORKER.md). [Beginner architecture overview](docs/CLOUD_OVERVIEW.md). The baseline retains the original network, activation, and protocol behavior.
+## Open the test programs
 
-**Phase 3b device authentication is verified locally and online:** missing/wrong credentials are rejected and the current local credential succeeds after synchronizing the Production Secret. [Device authentication procedure](docs/DEVICE_AUTH.md).
+Double-click these CMD launchers in the project folder. The programs and their shared modules live together in `tools/`; none depends on files on the Desktop.
 
-**Phase 3c shared request limits are verified locally and online:** the device gets 10 control requests per rolling minute, excess requests receive 429/retry responses, and recovery passes. Wrangler is authorized and the SQLite-backed counter is deployed. [Rate-limit deployment and checks](docs/RATE_LIMITS.md).
+| Test | CMD launcher | Program |
+| --- | --- | --- |
+| Microphone calibrator | [Open Microphone Calibrator.cmd](Open%20Microphone%20Calibrator.cmd) | `tools/microphone_calibrator.py` |
+| Follow-up conversation | [Open Robot Conversation Test.cmd](Open%20Robot%20Conversation%20Test.cmd) | `tools/robot_conversation_test.py` |
+| Spoken question | [Open Robot Question Test.cmd](Open%20Robot%20Question%20Test.cmd) | `tools/robot_question_test.py` |
+| Standalone | [Open Robot Standalone Test.cmd](Open%20Robot%20Standalone%20Test.cmd) | `tools/robot_standalone_test.py` |
+| Wake question | [Open Robot Wake Test.cmd](Open%20Robot%20Wake%20Test.cmd) | `tools/robot_wake_test.py` |
+| Live observer | [Open Robot Live Observer.cmd](Open%20Robot%20Live%20Observer.cmd) | `tools/robot_live_observer.py` |
 
-**Phase 3d Gemini session access is verified online:** the permanent key is a Production Worker Secret, authenticated temporary-token issuance passes, and Gemini 3.8 Live accepts the desktop constrained-WebSocket setup. All 20 local runtime test groups pass. That initial connection check sent no prompt or microphone audio. [Key setup, session contract and repeatable check](docs/GEMINI_SESSIONS.md).
+The five Desktop icons are Windows shortcuts to these same project programs. Copies are saved in `tools/desktop-shortcuts/`, so the Desktop shortcuts can be deleted. Continue opening the tests with the CMD launchers above. The saved shortcuts retain this computer's original absolute paths; the CMD launchers locate the programs relative to the project folder.
 
-**First desktop spoken reply is verified:** Gemini returned 2.74 seconds of valid 24 kHz mono PCM without clipped samples. Windows playback completed, and the user confirmed clear speech at normal speed. The test sent a fixed text greeting request and used no microphone. [Replay and results](docs/DESKTOP_VOICE.md).
+## Offline checks
 
-**Phase 3f prerecorded audio exchange is verified:** a 16 kHz synthetic question received the correct spoken answer at 24 kHz, with clear playback confirmed by the user. Six offline desktop-client tests pass. [Audio question, replay and results](docs/DESKTOP_AUDIO.md).
+```powershell
+python -m unittest discover -s tools -p 'test_*.py'
+python tools/check_cpp_policies.py
+```
 
-**Phase 4a ESP32 session requests are verified:** private device-credential provisioning and HTTPS rejection/success checks pass, and local capture/cue recovery works during a request. [Session-only profile and results](docs/ESP32_SESSIONS.md).
+The C++ runner requires native g++ or clang++. Worker runtime checks use `tools/worker.ps1 -Action test`.
 
-**Phase 4b direct ESP32 Gemini setup is verified:** six consecutive final connections verify setup acknowledgment and clean closure; concurrent local capture, offline recovery and the user's eyes/wake/listening/cue check pass. [Setup profile and results](docs/ESP32_GEMINI_SETUP.md).
-
-**Phase 4c Gemini speech through the robot is verified:** manual `v` receives a fixed greeting, closes Gemini, plays bounded PCM through the existing speaker, and returns to READY. The user confirms clear speech at normal speed. Repeated output, busy guards and device-side Wi-Fi-loss recovery pass. [Speaker checkpoint](docs/ESP32_VOICE.md).
-
-**Phase 4d microphone measurements are reviewed and applied:** three quiet + three speech samples had zero speech clipping at shift 14, 12.72 dB level contrast, and confirmed four-second phrase fit. Capture shift 15 adds headroom; wake stays at 12. The Desktop **ESP32 Microphone Calibrator** remains available for later adjustments. [Calibration and saved data](docs/MICROPHONE_CALIBRATOR.md).
-
-**Phase 4e real microphone question/answer is verified:** the user confirms a correct spoken result. The saved run verifies a complete four-second upload, exactly 3.8 seconds of reply playback, zero input/output clipping and READY recovery. **Robot Spoken Question Test** on the Desktop remains available for repeat tests, with automatic numeric-result saving. That checkpoint used the `question` profile with explicit Start; the successor wake profile is described below. [Results and repeat procedure](docs/ESP32_QUESTIONS.md). [Roadmap progress](docs/ROADMAP_STATUS.md).
-
-The first live failures exposed a fast device clock and unsupported audio-input metadata. Both are corrected. Connect validates Gemini setup before recording. Prerecorded and real microphone turns now pass.
-
-**Phase 5a armed wake question is verified:** three consecutive physical wake/question/answer/READY cycles passed, with correct clear answers confirmed by the user and zero input/output clipping. **Robot Wake Question Test** on the Desktop remains available: Connect, **Arm next wake**, say **Hi, E-S-P**, then ask the question when green appears. Each arm permits one question/reply and results autosave. That checkpoint used the `wake` profile. [Results and self-paced wake test](docs/ESP32_WAKE.md).
-
-**Phase 5b bounded follow-up is verified:** the quiet check and two full wake/question/answer/follow-up/answer/quiet/READY trials passed, with five correct clear answers confirmed by the user and zero input/output clipping. Both full conversations retain context on one connection; a fresh wake after closure passes. **Robot Follow-up Conversation Test** remains available for self-paced repeats. That checkpoint used `followup`, with two answers per Desktop arm and offline/unarmed boot. [Results and repeat procedure](docs/ESP32_FOLLOWUP.md).
-
-**Phase 5c standalone functional gate is verified:** COM26 runs `standalone`, connects saved Wi-Fi at boot, and permits two-answer conversations on **Hi, E-S-P** without a PC arm or heartbeat. Quiet closure and fresh wake pass; the user confirms cold boot and conversations on a separate USB supply with no PC USB. **Robot Standalone Test** autosaves observed trials and the human power checklist. Source remains in this project, with generated builds outside Dropbox. [Results and repeat procedure](docs/ESP32_STANDALONE.md).
-
-**Upload handling is hardened:** short/temporary TLS writes resume within the same frame and deadline; failed questions are not retried automatically. Ten controlled synthetic conversations / twenty answers pass deliberate write faults, and cancellation/driver shutdown plus ordinary link-loss recovery pass. The exact native cause of the older uninstrumented upload failure remains unproven. New numeric diagnostics autosave on failed uploads. Prolonged idle, actual-voice stress and broader outage checks remain later gates. [Change, evidence and limits](docs/UPLOAD_RECOVERY.md).
-
-Based on [TechTalkies/Xiaozhi-for-XiaoESP32S3](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3), preserving the supplied licenses and attribution.
+Based on [TechTalkies/Xiaozhi-for-XiaoESP32S3](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3) and Xiaozhi ESP32. Supplied root and firmware licenses and attribution are preserved. The untouched supplied reference remains under `_Reference_Code/` and saved recovery images remain under `recovery/`, both excluded from Git.

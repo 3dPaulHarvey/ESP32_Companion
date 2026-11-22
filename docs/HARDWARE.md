@@ -1,6 +1,10 @@
 # Hardware baseline
 
-Last updated: 2026-11-18. Development device: **COM26**, MAC **44:bd:8d:ec:38:e0**.
+Last updated: 2026-11-19. Development device: **COM26**, MAC **44:bd:8d:ec:38:e0**.
+
+## Current specialized build
+
+The single-board path is compiled directly from `board_config.h`. Standalone is the default build; `sdkconfig.hardware` fixes 8 MB flash and the existing partition table. The original board/display selection menus and alternate hardware paths are removed. GPIO button/LED objects had no standalone event listeners and are removed; wake and USB diagnostics remain the controls. The face geometry/animation is preserved; English status text now uses built-in Montserrat 14. [Specialization and current validation](PLATFORM_SPECIALIZATION.md). Earlier observations below document the original and intermediate images.
 
 ## Verified by hardware probe
 
@@ -25,9 +29,9 @@ The subsequent **upload-recovery** update adds bounded partial/temporary TLS wri
 
 ## Wiring to preserve
 
-Working source: `Source/xiaozhi-esp32-2.2.2/`. Original reference remains under `_Reference_Code/Xiaozhi-for-XiaoESP32S3-master/`.
+Working source: `Source/esp32-companion/`. Original reference remains under `_Reference_Code/Xiaozhi-for-XiaoESP32S3-master/`.
 
-Authoritative pin definitions: [`board_config.h`](../Source/xiaozhi-esp32-2.2.2/main/boards/seeedstudio-s3-wifi/board_config.h).
+Authoritative pin definitions: [`board_config.h`](../Source/esp32-companion/main/boards/seeedstudio-s3-wifi/board_config.h).
 
 | Peripheral | Signal | ESP32-S3 GPIO | XIAO pin |
 |---|---|---:|---|
@@ -42,17 +46,17 @@ Authoritative pin definitions: [`board_config.h`](../Source/xiaozhi-esp32-2.2.2/
 
 The reference specifies a 3.3 V I2S MEMS microphone, MAX98357A amplifier with 5 V VIN recommended, and 4 ohm / 3 W speaker. Preserve the existing supply wiring and shared ground. The exact installed microphone model and OLED controller have not been physically confirmed.
 
-Other definitions: onboard LED GPIO21; BOOT GPIO0; volume-up GPIO3; volume-down GPIO8. The touch placeholder also uses GPIO3. The board creates both GPIO3 button objects; touch press/release handlers are active, while BOOT and volume handlers are commented out. Do not change this overlap incidentally.
+Historical definitions included LED GPIO21, BOOT GPIO0, volume-up GPIO3, volume-down GPIO8, and a second GPIO3 touch placeholder. These unused original runtime objects were removed during specialization; they never controlled the standalone workflow.
 
 ## Build and driver settings
 
 | Setting | Baseline |
 |---|---|
 | IDF target | `esp32s3` |
-| Board Kconfig symbol | `CONFIG_BOARD_TYPE_SEEEDSTUDIO_S3_WIFI=y` |
+| Board selection | Fixed source; no generic selector |
 | Flash | `CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y` |
 | Partition CSV | `partitions/v2/8m.csv` |
-| Display | `CONFIG_OLED_SSD1306_128X64=y` |
+| Display | Fixed SSD1306 128x64 |
 | OLED bus | I2C0, address `0x3C`, 400 kHz; mirror X and Y |
 | Microphone | I2S1 RX, 16 kHz, mono, left slot |
 | Speaker | I2S0 TX, 24 kHz, mono, left slot |
@@ -62,7 +66,7 @@ Other definitions: onboard LED GPIO21; BOOT GPIO0; volume-up GPIO3; volume-down 
 
 The I2S driver uses 32-bit slots. Normal/wake input converts microphone words to signed 16-bit PCM with a right shift of 12 and clipping; speaker PCM is scaled into 32-bit output. Microphone/question profiles read raw words for bounded capture, using reviewed shift 15 and measuring headroom before clipping. Wake conversion stays unchanged. Although the board header defines `AUDIO_INPUT_REFERENCE`, the selected codec has one input channel and no reference channel; device AEC is not established by that define.
 
-Source inconsistencies found during inspection:
+Historical source inconsistencies, now removed by specialization:
 
 - Board README names IDF v5.4.1 and also mentions a 5.5 prompt. The actual component manifest requires **IDF >=5.5.2**.
 - Reference `config.json` has an incorrect board symbol and malformed 8 MB flash entry. Use the explicit settings above and verify the generated `sdkconfig`.

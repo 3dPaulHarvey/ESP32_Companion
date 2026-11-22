@@ -51,7 +51,7 @@ On this Windows setup, from the repository root:
 ```powershell
 $env:PATH = 'C:\msys64\ucrt64\bin;' + $env:PATH
 New-Item -ItemType Directory -Force .tools | Out-Null
-g++ -std=c++17 -Wall -Wextra -Werror -pedantic Source\xiaozhi-esp32-2.2.2\tests\local_companion_cycle_test.cpp -o .tools\local_companion_cycle_test.exe
+g++ -std=c++17 -Wall -Wextra -Werror -pedantic Source\esp32-companion\tests\local_companion_cycle_test.cpp -o .tools\local_companion_cycle_test.exe
 .\.tools\local_companion_cycle_test.exe
 ```
 

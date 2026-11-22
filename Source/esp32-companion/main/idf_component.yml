@@ -1,0 +1,10 @@
+# Fixed-board dependencies. Resolved versions remain pinned in dependencies.lock.
+dependencies:
+  78/esp-wifi-connect: ~3.0.2
+  espressif/esp_audio_effects: ~1.2.1
+  espressif/esp_audio_codec: ~2.4.1
+  espressif/esp-sr: ~2.3.0
+  lvgl/lvgl: ~9.4.0
+  espressif/esp_lvgl_port: ~2.7.0
+  idf:
+    version: '>=5.5.2'

@@ -1,113 +1,74 @@
-# Build, flash and recover
+# Build, flash and recovery
 
-Use the development unit on **COM26**. Leave the original working robot separate.
+Updated 2026-11-19 for the specialized companion. Original baseline firmware and historical results remain in recovery files and Git history; the original cloud runtime is no longer a build profile.
 
-The current increment is [standalone wake operation](ESP32_STANDALONE.md), with the functional voice and separate-USB-power gate verified; broader reliability remains open. Saved Wi-Fi starts at boot; Hi, E-S-P permits a bounded two-answer conversation without a Desktop arm or PC heartbeat. The [armed follow-up tester](ESP32_FOLLOWUP.md), [one-turn wake tester](ESP32_WAKE.md), [manual tester](ESP32_QUESTIONS.md) and local calibrator remain available. Controlled testers pause autonomy temporarily and restore it on close/lease expiry. Use the separate [local diagnostics profile](DIAGNOSTICS.md) for checks without the session module. Normal baseline commands below restore the original application behavior with English wake.
+## Build
 
-Build/flash the current increment with `-Profile standalone`; it uses `build-standalone/` and `sdkconfig.standalone.generated`. The preceding armed follow-up profile remains `-Profile followup`, one-turn wake is `-Profile wake`, manual turn is `-Profile question`, and local-only calibration is `-Profile microphone`. All seed capture shift 15. The wrapper verifies the development MAC on COM26 before flashing. Profiles retain separate build/configuration files. Original backups remain available. The device's NVS credential survives normal application flashing; a full flash restore returns NVS to that backup's earlier state.
-
-The current standalone image includes [bounded upload-write recovery](UPLOAD_RECOVERY.md), compiled write-policy tests and numeric diagnostics. Standalone/follow-up developer fixture images now inject controlled partial/no-progress writes in the first public-audio frame; normal images compile this test code out. Explicit Wi-Fi stop during a conversation waits for cancellation/TLS cleanup before driver shutdown.
-
-This workspace's synced build directory encountered Windows sharing locks on generated dependency files. Use `-BuildRoot (Join-Path $env:LOCALAPPDATA 'ESP32_Companion')` for both build and flash to place generated artifacts in that root's `build-<profile>/`. Source and generated SDK configuration stay in the project. The default path is unchanged when `-BuildRoot` is omitted. These disposable build outputs are not runtime dependencies for a flashed robot. [Exact standalone commands](ESP32_STANDALONE.md).
-
-Normal commands disable developer-only synthetic fixtures. `-FixtureCheck` is restricted to question, followup and standalone profiles, with separate verified fixture preparation. The standalone diagnostic image disables automatic cloud wake so unattended checks use only explicit synthetic inputs. See [standalone regression](ESP32_STANDALONE.md), [question regression](ESP32_QUESTIONS.md) and [follow-up regression](ESP32_FOLLOWUP.md). The installed normal image contains no fixture or f handler.
-
-## Pinned setup
-
-- ESP-IDF **v5.5.2**, clean installed Git tag at `C:\esp\v5.5.2\esp-idf`.
-- Activation: `C:\Espressif\tools\Microsoft.v5.5.2.PowerShell_profile.ps1`.
-- Python: `C:\Espressif\tools\python\v5.5.2\venv\Scripts\python.exe`.
-- ESP-IDF VS Code extension: **2.3.0**.
-- Firmware root: `Source/xiaozhi-esp32-2.2.2/`.
-- ESP32-S3, quad 8 MB flash, octal PSRAM, SSD1306 128x64.
-
-The board README's IDF 5.4.1 instructions are stale for this archive: `main/idf_component.yml` requires `>=5.5.2`. Its board `config.json` also has invalid board/flash symbols. Use the explicit `sdkconfig.baseline` profile rather than that release recipe.
-
-The current development profile selects bundled English **“Hi, ESP”** (`CONFIG_SR_WN_WN9_HIESP=y`) and disables the generic Chinese wake model. Say “Hi, E-S-P” with the three letters spoken separately. This is an existing ESP-SR model, documented in [Espressif's English example](https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/getting_started/readme.html). The original successful Chinese-model build is tagged `step-1-baseline-flashed` and archived in `recovery/.../built-baseline/`.
-
-To apply this change to an already-generated Chinese `sdkconfig`, use `idf.py menuconfig` and select the Hi,ESP WakeNet9 model while deselecting `wn9_nihaoxiaozhi_tts`. Default files seed fresh configurations; they do not override existing selections. A normal build/flash must include regenerated assets. Verify boot logs show `AfeWakeWord: Model 0: wn9_hiesp`.
-
-## Exact commands
-
-From the repository root, PowerShell:
+ESP-IDF **v5.5.2** is installed at `C:/esp/v5.5.2/esp-idf`. From the repository root:
 
 ```powershell
 .\tools\idf.ps1 -Action build
+```
+
+The default profile is **standalone**. Build outputs default to `%LOCALAPPDATA%/ESP32_Companion/build-standalone/`, outside Dropbox. Use `-BuildRoot PATH` for another output parent. Source stays in `Source/esp32-companion/`. Each build owns its generated configuration at `build-<profile>/sdkconfig`, outside Dropbox. `%LOCALAPPDATA%` is persistent local application data, not the temporary directory. VS Code build paths point to the same default standalone build. If configuration was interrupted, run `-Action reconfigure` with the same profile and BuildRoot before building again.
+
+A missing build folder is regenerated from the checked-in defaults and pinned dependency lock. No old object files or generated source sdkconfig are needed. The verified flash configuration selects QIO; ESP-IDF emits a DIO image header before the bootloader enables quad mode. The generated flash arguments remain authoritative.
+
+The fixed configuration uses `sdkconfig.defaults`, `sdkconfig.defaults.esp32s3`, and `sdkconfig.hardware`, followed by the selected profile's files in `config/`. It requires ESP32-S3, 8 MB flash, the existing `partitions/v2/8m.csv`, 8 MB PSRAM, and the bundled English `wn9_hiesp` wake model. Wiring and OLED geometry are compiled directly from `board_config.h`. No board/display/language selection menu remains.
+
+Useful reduced diagnostic profiles remain: `diagnostics`, `session`, `gemini`, `voice`, `microphone`, `question`, `wake`, and `followup`. These support the existing calibrator and self-paced test tools. `-FixtureCheck` is restricted to question/followup/standalone and embeds only the public synthetic test PCM; these images do not automatically upload room microphone audio.
+
+## Clean rebuilds and retained files
+
+The 2026-11-19 cleanup reduced the Dropbox workspace from 3.98 GB to approximately 1.20 GB. It removed all eight old in-source build trees, the previous external build trees, generated source sdkconfig files, npm download cache, the Node ZIP installer, and old host-test executables. Active managed components, portable Node and Worker node_modules remain because they are development dependencies. `dependencies.lock` fixes the firmware package versions.
+
+A fresh build folder regenerates sdkconfig from the versioned defaults. The preflash check reads the chosen build's actual sdkconfig and binary paths from its metadata. To bypass compiler caching explicitly:
+
+```powershell
+.\tools\idf.ps1 -Action build -NoCache
+```
+
+`-NoCache` forces compilation without ccache; it does not delete a build directory. For a clean directory on a future occasion, select a new `-BuildRoot` or remove that profile's generated build folder first. Avoid keeping many duplicate build roots.
+
+Keep source/Git history, hardware/profile defaults, dependency locks, credentials, real calibration/test evidence, the original full-flash backup, and the last physically verified firmware with its symbols/configuration. Those historical recovery artifacts remain under `recovery/`. There is no need to retain the old compiler object/cache trees alongside them. The newly rebuilt image stays in persistent LocalAppData until the next build or an explicit cleanup. The current build tree is approximately 206 MB; 4.29 GB of obsolete files were deleted across both locations, for approximately 4.09 GB net reduction after rebuilding.
+
+The latest fresh cache-disabled `esp32_companion` standalone build and preflash checks pass, with 155 compiled policy assertions and a 1,935,552-byte normal app (SHA256 `9da0248507080060586e1a00d7e224b6dd60b59ce5f297cbcd1efbb01853c0d0`). No device flash was performed. Original recovery/reference files were verified unchanged by hash; detailed cleanup evidence is under `logs/clean-slate-*`.
+
+## Flash
+
+Close all serial clients first. The wrapper verifies COM26 and its expected MAC before any profile is flashed:
+
+```powershell
+python .\tools\check_standalone_build.py
 .\tools\idf.ps1 -Action flash -Port COM26
 .\tools\idf.ps1 -Action monitor -Port COM26
 ```
 
-The wrapper activates the installed v5.5.2 environment, enters the firmware root and runs this equivalent command (replace `build` with `-p COM26 flash` or `-p COM26 monitor`):
+For a custom BuildRoot, pass the actual build directory to `check_standalone_build.py --build PATH`. Exit the IDF monitor with **Ctrl+]**. The verification tool also checks the historical recovery files, secure TLS configuration, fixture exclusion, compiled policy assertions and absence of the private device credential.
 
-```powershell
-. 'C:\Espressif\tools\Microsoft.v5.5.2.PowerShell_profile.ps1'
-Set-Location .\Source\xiaozhi-esp32-2.2.2
-idf.py -DIDF_TARGET=esp32s3 '-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.baseline' build
-```
+Current project identity is `esp32_companion`; the source directory is `Source/esp32-companion/`. Historical recovery artifacts keep their original filenames and are resolved from their saved metadata.
 
-Exit the IDF monitor with **Ctrl+]**. Close monitors before backup/flash. Defaults seed a fresh `sdkconfig`; they do not overwrite an existing user's menuconfig choices. Before flashing, check the generated `sdkconfig` still selects `CONFIG_BOARD_TYPE_SEEEDSTUDIO_S3_WIFI=y`, `CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y`, `partitions/v2/8m.csv`, and `CONFIG_OLED_SSD1306_128X64=y`.
+Expected outputs include `esp32_companion.bin`, `esp32_companion.elf`, `esp32_companion.map`, bootloader, partition table, initial OTA metadata, `generated_assets.bin`, and `flasher_args.json`. The wake-only asset image is generated locally and flashed with the app. Flashing only the app while retaining unrelated old assets is not the normal workflow. The existing OTA partitions are retained for recovery/layout compatibility; no firmware OTA client remains.
 
-Expected build results: `build/xiaozhi.bin`, `bootloader/bootloader.bin`, `partition_table/partition-table.bin`, `ota_data_initial.bin`, `generated_assets.bin`, and `flasher_args.json`. Expected flash output includes `Hash of data verified` and a reset. Flashing the assets is necessary for the wake model.
+## Recovery
 
-The original application can automatically install an OTA update once Wi-Fi/activation succeeds. Record the boot version and any OTA event when checking the baseline; an update can replace the locally flashed image. No cloud behavior has been altered for this first build.
+The original full 8 MB flash backup remains under `recovery/2026-11-09-COM26/`. Do not overwrite it or use a blanket erase. Normal generated flash commands preserve the NVS region containing Wi-Fi/device credentials. The generated `flasher_args.json` is authoritative.
 
-## Before the first write
-
-Save an exact full-flash backup, checksum, and decoded partition table under `recovery/2026-11-09-COM26/`. This directory is Git-ignored because flash/NVS may contain device and Wi-Fi credentials. The initial read command is:
-
-```powershell
-& 'C:\Espressif\tools\python\v5.5.2\venv\Scripts\python.exe' -m esptool --chip esp32s3 --port COM26 --baud 460800 read_flash 0x0 0x800000 .\recovery\2026-11-09-COM26\original-full-flash.bin
-Get-FileHash .\recovery\2026-11-09-COM26\original-full-flash.bin -Algorithm SHA256
-```
-
-Confirm the backup is **8,388,608 bytes** and matches the saved checksum. Never overwrite that original backup. Preserve the supplied `Firmware/` binaries and flash map as a second recovery option.
-
-## Flash map
-
-| Address | File / region |
+| Address | Region |
 |---|---|
 | `0x000000` | bootloader |
 | `0x008000` | partition table |
-| `0x009000` | NVS, retained by normal build flashing |
-| `0x00D000` | initial OTA metadata |
+| `0x009000` | NVS, preserved by normal flash |
+| `0x00D000` | OTA metadata |
 | `0x00F000` | PHY data |
-| `0x020000` | firmware in OTA0 |
-| `0x310000` | OTA1 |
-| `0x600000` | local assets and wake model |
+| `0x020000` | application in OTA0 |
+| `0x310000` | OTA1, retained layout |
+| `0x600000` | local wake-model assets |
 
-The generated `build/flasher_args.json` is authoritative for a successful build. Do not use a blanket erase.
-
-## Smoke-test checklist
-
-Monitor at 115200 baud. Expected initialization markers include `Init SeeedStudioS3WifiBoard`, PSRAM discovery, `NoAudioCodec`, and application state logs. The baseline may enter Wi-Fi provisioning or activation; that is expected original behavior and does not prove independent hardware diagnostics.
-
-For a bounded 30-second capture from the repository root:
-
-```powershell
-python .\tools\capture_serial.py --port COM26 --reset --seconds 30 --name baseline-boot
-```
-
-This resets the device and prints selected hardware/state lines. Full output stays in the ignored `logs/` directory. Exact markers include `NoAudioCodec: Simplex channels created`, `AudioCodec: Audio codec started`, and `State: <old> -> <new>`. Loaded wake models log `AfeWakeWord: Model ...` only after assets have been applied.
-
-- [ ] No reboot loop or watchdog/panic; 8 MB PSRAM initializes.
-- [ ] OLED shows animated eyes and blinking.
-- [ ] Speaker cue is audible and clean.
-- [ ] Mic responds to voice (requires diagnostic measurement or proven conversation).
-- [ ] Wi-Fi connects/provisions; no credential values are copied into committed logs.
-- [ ] Actual loaded wake phrase is identified and repeatable.
-
-In the unchanged production application, `Wake word detected: ...` is logged only after opening the cloud audio channel succeeds. A local recognition can first appear as `idle -> connecting`, even if the service then fails. Use that state transition as local detection evidence; absent speech alone does not prove a microphone failure.
-
-Record measured results in `TEST_LOG.md`; source inspection alone does not pass these checks. Network-independent diagnostics belong to the next small implementation after this baseline is reviewable.
-
-## Exact rollback
-
-Close the serial monitor. Check the backup checksum against `original-full-flash.sha256`, then restore all 8 MB:
+For an exact rollback on this same device, verify the saved checksum and restore its full backup with the installed ESP-IDF Python:
 
 ```powershell
 & 'C:\Espressif\tools\python\v5.5.2\venv\Scripts\python.exe' -m esptool --chip esp32s3 --port COM26 --baud 460800 write_flash 0x0 .\recovery\2026-11-09-COM26\original-full-flash.bin
 ```
 
-This restores that device's original bootloader, partition table, OTA selection, app, assets, and NVS. Use this backup only for the same development unit. If the port vanishes, hold BOOT, press/release RESET, release BOOT, then inspect Windows for the new COM number and substitute it. Power-cycle after restoring.
-
-If the saved device image is unavailable, the untouched reference `Firmware/flash_code.txt` supplies a separate factory-style multi-file map. Its COM24 is obsolete; substitute the connected port. A multi-file factory flash does not restore the saved device NVS/OTA state as a full device backup does.
+The full backup restores the original NVS and OTA selection too. If the port vanishes, hold BOOT, press/release RESET, release BOOT and check Windows for the new COM number. See [observed tests](TEST_LOG.md) and [source provenance](BASELINE.md) for the original baseline evidence.

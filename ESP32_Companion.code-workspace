@@ -1,16 +1,27 @@
 {
     "folders": [
         { "name": "Companion", "path": "." },
-        { "name": "Firmware", "path": "Source/xiaozhi-esp32-2.2.2" }
+        { "name": "Firmware", "path": "Source/esp32-companion" }
     ],
     "settings": {
         "idf.currentSetup": "C:\\esp\\v5.5.2\\esp-idf",
         "idf.port": "COM26",
         "idf.monitorPort": "COM26",
+        "idf.buildPath": "${env:LOCALAPPDATA}/ESP32_Companion/build-standalone",
+        "cmake.buildDirectory": "${env:LOCALAPPDATA}/ESP32_Companion/build-standalone",
         "idf.sdkconfigDefaults": [
             "sdkconfig.defaults",
             "sdkconfig.defaults.esp32s3",
-            "sdkconfig.baseline"
+            "sdkconfig.hardware",
+            "config/diagnostics.defaults",
+            "config/session.defaults",
+            "config/gemini.defaults",
+            "config/voice.defaults",
+            "config/microphone.defaults",
+            "config/question.defaults",
+            "config/wake.defaults",
+            "config/followup.defaults",
+            "config/standalone.defaults"
         ]
     }
 }

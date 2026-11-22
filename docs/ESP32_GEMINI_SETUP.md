@@ -24,7 +24,7 @@ python .\tools\test_esp32_gemini_tool.py
 python .\tools\check_esp32_gemini.py
 ```
 
-The flash guard permits only COM26 with development MAC `44:bd:8d:ec:38:e0`. Output is isolated in `build-gemini/` with `sdkconfig.gemini.generated`; `-Profile session` restores the preceding session-only checkpoint. Normal application flashing preserves NVS. If the device credential has not been provisioned or has been rotated, use the private provisioning procedure in [ESP32_SESSIONS.md](ESP32_SESSIONS.md).
+The flash guard permits only COM26 with development MAC `44:bd:8d:ec:38:e0`. Output is isolated in `%LOCALAPPDATA%/ESP32_Companion/build-gemini/`, including its generated `sdkconfig`; `-Profile session` restores the preceding session-only checkpoint. Normal application flashing preserves NVS. If the device credential has not been provisioned or has been rotated, use the private provisioning procedure in [ESP32_SESSIONS.md](ESP32_SESSIONS.md).
 
 The hardware checker verifies profile/identity, quiet boot, Wi-Fi-off rejection, existing 401/200 behavior, three direct setup/close cycles, the busy guard, concurrent local capture, offline recovery, and quiet reboot. It leaves Wi-Fi off. It sends no question or audio message, prints no raw serial output, and saves only controlled result/heap metadata under ignored `logs/`. Failures also retain that bounded metadata. The requests share the existing ten-per-minute Worker admission limit.
 

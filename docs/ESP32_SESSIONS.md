@@ -32,7 +32,7 @@ python .\tools\test_esp32_session_tool.py
 python .\tools\check_esp32_session.py --reset
 ```
 
-The flash wrapper verifies **COM26 / 44:bd:8d:ec:38:e0** before writing. A different port or board fails the session-profile flash guard. The separate output directory is `build-session/`, with generated `sdkconfig.session.generated`. Baseline and diagnostics profiles remain available.
+The flash wrapper verifies **COM26 / 44:bd:8d:ec:38:e0** before writing. A different port or board fails the session-profile flash guard. The separate output directory is `%LOCALAPPDATA%/ESP32_Companion/build-session/`, including its generated `sdkconfig`. Standalone and diagnostics profiles remain available; the original baseline is retained only in recovery archives.
 
 On a board without the credential, or after rotating it, use:
 

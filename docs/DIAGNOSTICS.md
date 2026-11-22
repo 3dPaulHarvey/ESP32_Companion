@@ -1,8 +1,8 @@
 # Local hardware diagnostics
 
-This compile-time profile uses the existing XIAO board, I2S codec, OLED face timer, audio service and English AFE wake model. It enters a dedicated startup instead of `Application::Initialize()` / `Run()`. It never starts OTA, activation, MQTT, WebSocket or a cloud audio session. Wi-Fi is off at boot, and the local model comes directly from the flashed assets partition.
+This compile-time profile runs the fixed XIAO board, I2S codec, OLED face timer, audio service and English AFE wake model locally. It uses the shared companion runtime with cloud conversation features disabled. Wi-Fi is off at boot, and the local model comes directly from the flashed assets partition.
 
-The normal English Xiaozhi baseline remains available with `-Profile baseline` (the wrapper default). Its saved firmware is also archived under `recovery/2026-11-09-COM26/english-wake/`; the original device's full-flash backup is separate. See [recovery instructions](BUILD_AND_FLASH.md).
+The normal workflow is `-Profile standalone`, which is the wrapper default. The original baseline is no longer an active build profile; its saved English-wake firmware remains under `recovery/2026-11-09-COM26/english-wake/`, separate from the original device's full-flash backup. See [recovery instructions](BUILD_AND_FLASH.md).
 
 ## Build and flash
 
@@ -14,14 +14,14 @@ From the repository root:
 .\tools\idf.ps1 -Action monitor -Profile diagnostics -Port COM26
 ```
 
-The diagnostics use `build-diagnostics/` and `sdkconfig.diagnostics.generated`, keeping the baseline build/config separate. Defaults load the shared board profile followed by `config/diagnostics.defaults`. The diagnostic console uses primary USB Serial/JTAG so COM26 accepts commands; the baseline's secondary USB console only mirrors output.
+The diagnostics use `%LOCALAPPDATA%/ESP32_Companion/build-diagnostics/`, with their generated `sdkconfig` inside that build folder. Defaults load the fixed hardware configuration followed by `config/diagnostics.defaults`. The diagnostic console uses primary USB Serial/JTAG so COM26 accepts commands. Generated output stays outside Dropbox.
 
 Diagnostic startup explicitly installs the USB Serial/JTAG RX/TX driver and binds the console VFS to it before polling nonblocking input. Selecting USB as primary alone did not provide usable input with this installed IDF's default polling backend.
 
-To return to the normal baseline, close the monitor and run:
+To return to standalone operation, close the monitor and run:
 
 ```powershell
-.\tools\idf.ps1 -Action flash -Profile baseline -Port COM26
+.\tools\idf.ps1 -Action flash -Profile standalone -Port COM26
 ```
 
 ## What runs
@@ -64,7 +64,7 @@ Commands are single lowercase characters; Enter is optional.
 
 The wake/cue sequence uses the explicit local controller with [bounded microphone capture](LOCAL_CAPTURE.md). LISTENING waits for two seconds of real PCM; the cue marks the end. Face/cue test commands are ignored during an active cycle.
 
-The Wi-Fi test uses the existing `WifiManager` directly, avoiding the production board's provisioning timeout and application/cloud callbacks. It starts no configuration hotspot and does not change saved credentials. A missing access point is retried with bounded scan backoff. The `r` command tests device-side reconnection; physically disabling/re-enabling the access point is a separate observation.
+The Wi-Fi test uses `WifiManager` directly in station mode. It starts no configuration hotspot and does not change saved credentials. A missing access point is retried with bounded scan backoff. The `r` command tests device-side reconnection; physically disabling/re-enabling the access point is a separate observation.
 
 For bounded captures without opening the interactive monitor:
 

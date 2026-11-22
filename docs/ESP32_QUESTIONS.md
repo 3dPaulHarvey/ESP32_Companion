@@ -4,7 +4,7 @@
 
 ## Repeat the manual test
 
-1. Connect the development robot on COM26 and close serial monitors. Open **Robot Spoken Question Test** on the Desktop, or **Open Robot Question Test.cmd** in the project.
+1. Connect the development robot on COM26 and close serial monitors. Double-click **Open Robot Question Test.cmd** in the project folder.
 2. Click **Connect robot**. The app verifies the development MAC, checks capture shift 15, connects saved Wi-Fi, and completes a Gemini setup/close check before enabling Start. This preflight sends no question or microphone audio. It then pauses incidental wake recognition between samples.
 3. From 1–2 feet away in a quiet room, click **Start question**. Wait for the countdown and green **SPEAK NOW**, then say **“What is two plus two?”** once at normal volume.
 4. Stop at the local end cue. The robot shows CONNECTING, receives a reply, shows SPEAKING while playing it, then returns to READY.
@@ -38,7 +38,7 @@ The cloud connection closes before playback. The output task remains the sole sp
 python .\tools\test_robot_question.py
 ```
 
-The flash wrapper verifies the development MAC. `question` uses separate `build-question/` and `sdkconfig.question.generated`; `microphone` remains the local-only alternative. Both now seed shift 15. Existing generated configurations are not overwritten by default files; the local microphone configuration was explicitly updated before its regression build.
+The flash wrapper verifies the development MAC. `question` uses `%LOCALAPPDATA%/ESP32_Companion/build-question/`, including its generated `sdkconfig`; `microphone` remains the local-only alternative. Both now seed shift 15. Existing generated configurations are not overwritten by default files; the local microphone configuration was explicitly updated before its regression build.
 
 Initial local-only hardware checks verified offline/held-control rejection, early cancellation, busy guards, retained-input discard when Wi-Fi disappears before upload, subsequent ordinary capture, and idle/wake recovery. Those initial checks made **no provider request and uploaded no room audio**. Subsequent prerecorded and live results are recorded below. [Roadmap](ROADMAP_STATUS.md).
 

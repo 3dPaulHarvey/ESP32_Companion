@@ -16,7 +16,7 @@
             "problemMatcher": ["$gcc"]
         },
         {
-            "label": "Companion: build baseline",
+            "label": "Companion: build standalone",
             "type": "process",
             "command": "powershell.exe",
             "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/tools/idf.ps1", "-Action", "build"],

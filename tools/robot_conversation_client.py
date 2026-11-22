@@ -23,6 +23,13 @@ SEND_FAILURE = (r"CompanionConversation: SEND_FAILURE turn=(\d+) opcode=(\d+) ex
     r"input_bytes=(\d+) input_chunks=(\d+) wifi=([01]) rssi=(-?\d+) internal_free=(\d+)")
 WRITE_FAILURE = r"CompanionConversation: WRITE_FAILURE status=(complete|timeout|stopped|fatal|invalid) written=(\d+) calls=(\d+) waits=(\d+) partials=(\d+) last_return=(-?\d+)"
 WRITE_STATS = r"CompanionConversation: WRITE_STATS calls=(\d+) waits=(\d+) partials=(\d+) question_retries=0"
+CONNECTION_TIMING = r"CompanionConversation: CONNECTION_TIMING upgrade_ms=(\d+) ready_ms=(\d+)"
+TURN_TIMING = (r"CompanionConversation: TIMING turn=(\d+) upload_ms=(\d+) first_audio_ms=(\d+) "
+    r"generation_complete_ms=(\d+) turn_complete_ms=(\d+) playback_start_ms=(\d+)")
+PLAYBACK_BEGIN = (r"CompanionConversation: PLAYBACK_BEGIN turn=(\d+) since_upload_ms=(\d+) "
+    r"generation_complete=([01]) turn_complete=([01]) mono_us=(\d+)")
+SESSION_FETCH = (r"CompanionSession: FETCH (?:kind=([a-z_]+) )?elapsed_ms=(\d+) "
+    r"(?:ok=([01]) )?http=(\d+) reason=([a-z_]+)")
 
 
 def transport_observations(line):
@@ -30,9 +37,18 @@ def transport_observations(line):
             ("upload_health", UPLOAD_HEALTH, ["turn", "bytes", "chunks", "ended", "upload_ms", "max_send_ms", "slow_sends"]),
             ("transport_failure", SEND_FAILURE, ["turn", "opcode", "expected", "returned", "elapsed_ms", "system_errno", "socket_errno",
                 "tls_status", "tls_error", "tls_flags", "input_bytes", "input_chunks", "wifi", "rssi", "internal_free"]),
+            ("connection_timing", CONNECTION_TIMING, ["upgrade_ms", "ready_ms"]),
+            ("turn_timing", TURN_TIMING, ["turn", "upload_ms", "first_audio_ms", "generation_complete_ms", "turn_complete_ms", "playback_start_ms"]),
+            ("playback_begin", PLAYBACK_BEGIN, ["turn", "since_upload_ms", "generation_complete", "turn_complete", "mono_us"]),
             ("write_stats", WRITE_STATS, ["calls", "waits", "partials"])]:
         match = re.search(pattern, line)
         if match: return event, dict(zip(names, map(int, match.groups())))
+    match = re.search(SESSION_FETCH, line)
+    if match:
+        data = {"elapsed_ms": int(match[2]), "http": int(match[4]), "reason": match[5]}
+        if match[1] is not None: data["kind"] = match[1]
+        if match[3] is not None: data["ok"] = int(match[3])
+        return "session_fetch", data
     match = re.search(WRITE_FAILURE, line)
     if match:
         return "write_failure", {"status": match[1], **dict(zip(["written", "calls", "waits", "partials", "last_return"], map(int, match.groups()[1:])))}
@@ -78,8 +94,16 @@ def conversation_metadata(text, expected_turns, *, fixture=False):
     if [v["accepted"] for v in decisions] != ([1, 0] if expected_turns == 2 else [0]):
         raise CheckFailure("The follow-up did not distinguish speech from the requested silence window.")
     if not 0 < elapsed < 160000: raise CheckFailure("Conversation exceeded its bounded session time.")
+    timing = {}
+    for line in text.splitlines():
+        observation = transport_observations(line)
+        if not observation: continue
+        event, data = observation
+        if event == "connection_timing": timing[event] = data
+        elif event in {"turn_timing", "playback_begin", "session_fetch"}: timing.setdefault(event, []).append(data)
     return {"completed_turns": turns, "same_connection": True, "normal_close": True, "quiet_timeout": True,
-        "quiet_discards": quiet, "input_bytes_per_turn": 128000, "outputs": outputs, "vad": decisions, "elapsed_ms": elapsed, "fixture": fixture}
+        "quiet_discards": quiet, "input_bytes_per_turn": 128000, "outputs": outputs, "vad": decisions, "elapsed_ms": elapsed, "fixture": fixture,
+        **timing}
 
 
 class ConversationDevice(CalibratorDevice):

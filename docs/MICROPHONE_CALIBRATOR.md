@@ -6,7 +6,7 @@ We are checking whether normal speech clips, how far speech levels rise above ro
 
 ## Open and run
 
-1. Connect the development robot on **COM26** and close serial monitors. Double-click **ESP32 Microphone Calibrator** on the Desktop, or **Open Microphone Calibrator.cmd** in the project folder.
+1. Connect the development robot on **COM26** and close serial monitors. Double-click **Open Microphone Calibrator.cmd** in the project folder.
 2. Click **Connect robot**. It verifies the development MAC, checks the microphone firmware, turns Wi-Fi off if necessary, and temporarily pauses wake recognition while the app owns calibration. Connecting never starts a sample.
 3. Follow three **Quiet baseline** samples. Pause background audio, click **Start this sample** when ready, and stay silent during the four-second green **STAY QUIET** window. The robot's cue marks the end. Click **Keep this sample** if you followed the instructions; otherwise choose **Redo this sample**.
 4. Follow three **Normal speech** samples. Sit 1–2 feet from the robot microphone. Click Start, wait for the countdown and green **SPEAK NOW**, and say **“What is two plus two?”** once at normal volume. Speak to the robot, not the PC. Keep only if the sentence fit before the cue. Clipping is useful evidence: do not redo a correctly performed sample just to obtain a lower peak.
